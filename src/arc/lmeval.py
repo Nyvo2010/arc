@@ -18,14 +18,9 @@ tasks would require HF generate(), which the ARC wrappers do not implement.
 from types import SimpleNamespace
 
 import torch
+from lm_eval.api.registry import register_model
+from lm_eval.models.huggingface import HFLM
 from torch import Tensor
-
-
-def _register_hflm():
-    from lm_eval.api.registry import register_model
-    from lm_eval.models.huggingface import HFLM
-
-    return register_model, HFLM
 
 
 class ArcCausalLMShim(torch.nn.Module):
@@ -72,10 +67,7 @@ def _build_arc_model(scale: str, recurrence: int, path: str, device_map, block_s
     return build_recurrent_model(scale, adapter, recurrence)
 
 
-_register_model, HFLM = _register_hflm()
-
-
-@_register_model("arc")
+@register_model("arc")
 class ArcLM(HFLM):
     """HFLM subclass that evaluates ARC models.
 
@@ -126,9 +118,8 @@ class ArcLM(HFLM):
 
 
 def cli() -> None:
-    """Console entry point that registers 'arc' then runs the lm-eval CLI."""
-    import arc.lmeval  # noqa: F401  (registers the model type)
-
+    """Console entry point: importing this module registers 'arc', then the
+    standard lm-eval CLI takes over."""
     from lm_eval.__main__ import cli_evaluate
 
     cli_evaluate()

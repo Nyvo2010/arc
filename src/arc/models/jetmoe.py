@@ -132,7 +132,8 @@ def load_jetmoe(path: str, device_map: str | None = "auto"):
     model = AutoModelForCausalLM.from_pretrained(
         path,
         quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-        device_map=device_map,
+        # int8 weights must land on a GPU; never let None reach from_pretrained
+        device_map=device_map or "auto",
     )
     model.eval()
     return model

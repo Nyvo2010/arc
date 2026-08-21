@@ -80,7 +80,7 @@ Kaggle's Benchmarks feature evaluates only Kaggle-hosted models, so quality metr
 !arc-lm-eval --model arc \
     --model_args scale=model,recurrence=2,path=jetmoe/jetmoe-8b \
     --tasks mmlu,gpqa_diamond_zeroshot,hellaswag --limit 500 \
-    --batch_size auto --device cuda:0
+    --batch_size auto:2 --device cuda:0
 # then read arc_model.total_flops_used from the saved run for the compute side
 ```
 
