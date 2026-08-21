@@ -20,6 +20,15 @@ def test_variant_rejects_invalid_base_recurrence():
         ModelVariant("jetmoe", "weights", recurrence=2)
 
 
+def test_registry_rejects_unknown_architecture():
+    """Contract guard: future architectures must register before use."""
+    import arc.lmeval  # noqa: F401
+    from arc.models.registry import create_adapter
+
+    with pytest.raises(ValueError, match="unknown architecture"):
+        create_adapter("tiny", architecture="deepseekmoe")
+
+
 def test_protocol_contains_required_tasks_and_zero_shot():
     protocol = BenchmarkProtocol()
     assert protocol.tasks == (
