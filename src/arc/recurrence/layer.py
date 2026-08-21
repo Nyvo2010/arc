@@ -1,0 +1,1 @@
+"""Layer recurrence stub."""

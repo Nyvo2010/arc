@@ -1,0 +1,4 @@
+block_adaptive:
+  recurrence_type: block
+  controller: entropy_threshold
+  max_loops: 8

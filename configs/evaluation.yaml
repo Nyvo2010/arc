@@ -1,0 +1,3 @@
+evaluation:
+  benchmarks: [mmlu, hellaswag]
+  metrics: [accuracy, perplexity]

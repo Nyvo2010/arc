@@ -1,0 +1,4 @@
+block_fixed:
+  recurrence_type: block
+  fixed_schedule: uniform
+  loops: [2, 4]

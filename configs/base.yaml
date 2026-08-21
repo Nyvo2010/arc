@@ -1,0 +1,5 @@
+base:
+  model_name: jetmoe-8b
+  recurrence_type: model
+  max_loops: 4
+  compute_budget: null

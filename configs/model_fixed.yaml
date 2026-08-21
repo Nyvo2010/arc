@@ -1,0 +1,4 @@
+model_fixed:
+  recurrence_type: model
+  fixed_schedule: uniform
+  loops: [2, 4, 8]
