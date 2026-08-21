@@ -1,4 +1,5 @@
 from arc.recurrence.base import (
+    BaseLM,
     BlockRecurrenceLM,
     LayerRecurrenceLM,
     ModelRecurrenceLM,
@@ -6,4 +7,4 @@ from arc.recurrence.base import (
     build_recurrent_model,
 )
 
-__all__ = ["RecurrentLM", "ModelRecurrenceLM", "BlockRecurrenceLM", "LayerRecurrenceLM", "build_recurrent_model"]
+__all__ = ["BaseLM", "RecurrentLM", "ModelRecurrenceLM", "BlockRecurrenceLM", "LayerRecurrenceLM", "build_recurrent_model"]

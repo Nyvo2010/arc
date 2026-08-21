@@ -3,37 +3,28 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
 
 from arc.compute.flops import jetmoe_lm_head_flops_per_token
-from arc.compute.latency import timer
-from arc.models.base import ARCAdapter, ForwardContext, RecurrenceResult, TraceEvent
-from arc.recurrence.scheduler import FixedSchedule
+from arc.models.base import ARCAdapter, ForwardContext, RecurrenceResult
 from arc.recurrence.state import RecurrenceState
-from arc.routing.instrumentation import summarize_router_records
 
 
 class RecurrentLM(torch.nn.Module, ABC):
-    """Base for the three single-scale recurrence models.
+    """Base for the three fixed-recurrence models.
 
     Hidden state always chains forward across repeated executions; the final
-    norm + LM head run exactly once after the last execution. Hard limits are
-    enforced here in the runtime, never by a controller.
+    norm + LM head run exactly once after the last execution.
     """
 
     scale: str = "model"
 
-    def __init__(
-        self,
-        adapter: ARCAdapter,
-        schedule: FixedSchedule,
-        compute_budget_flops: float | None = None,
-    ):
+    def __init__(self, adapter: ARCAdapter, recurrence: int):
         super().__init__()
         self.adapter = adapter
-        self.schedule = schedule
-        self.compute_budget_flops = compute_budget_flops
+        if recurrence < 1:
+            raise ValueError("recurrence must be at least 1")
+        self.recurrence = recurrence
         self.transformer = adapter.hf_model
 
     @abstractmethod
@@ -42,66 +33,82 @@ class RecurrentLM(torch.nn.Module, ABC):
     @abstractmethod
     def num_units(self) -> int: ...
 
-    def forward(self, input_ids: Tensor) -> RecurrenceResult:
+    def forward(
+        self,
+        input_ids: Tensor,
+        attention_mask: Tensor | None = None,
+        position_ids: Tensor | None = None,
+    ) -> RecurrenceResult:
         adapter = self.adapter
-        adapter.begin_step()
         hidden = adapter.embed(input_ids)
-        ctx = adapter.prepare(hidden)
+        ctx = adapter.prepare(hidden, attention_mask=attention_mask, position_ids=position_ids)
         seq_len = hidden.shape[1]
+        batch_size = hidden.shape[0]
 
         state = RecurrenceState(
             scale=self.scale,
-            max_executions=self.schedule.total_executions,
-            compute_budget=self.compute_budget_flops,
+            max_executions=self.num_units() * self.recurrence,
         )
-        last_logits_history: list[Tensor] = []
-
         with torch.no_grad():
-            last_logits_history.append(adapter.last_token_logits(hidden).squeeze(1))
-            stop = False
             for unit_index in range(self.num_units()):
-                if stop:
-                    break
-                for iteration in range(self.schedule.count_for(unit_index)):
-                    est = adapter.unit_flops(self.scale, unit_index, seq_len)
-                    if self.compute_budget_flops is not None and state.compute_used + est > self.compute_budget_flops:
-                        state.truncated = True
-                        stop = True
-                        break
-                    h_prev = hidden
-                    lat: list[float] = []
-                    with timer(lat):
-                        hidden = self.execute_unit(unit_index, hidden, ctx)
-                    sim = F.cosine_similarity(
-                        hidden.float().reshape(-1, hidden.shape[-1]),
-                        h_prev.float().reshape(-1, h_prev.shape[-1]),
-                        dim=-1,
-                    ).mean()
+                for iteration in range(self.recurrence):
+                    est = adapter.unit_flops(
+                        self.scale, unit_index, seq_len, batch_size=batch_size
+                    )
+                    hidden = self.execute_unit(unit_index, hidden, ctx)
+                    if self.scale == "model" and iteration + 1 < self.recurrence:
+                        # A complete native JetMoE pass ends with RMSNorm. Apply
+                        # it before chaining into the next model traversal.
+                        hidden = adapter.normalize(hidden)
                     state.compute_used += est
                     state.record_execution(unit_index)
-                    state.trace.append(
-                        TraceEvent(
-                            scale=self.scale,
-                            unit_index=unit_index,
-                            iteration=iteration + 1,
-                            hidden_delta_cos=round(float(1.0 - sim), 6),
-                            est_flops=est,
-                            latency_s=lat[0],
-                        )
-                    )
-                    last_logits_history.append(adapter.last_token_logits(hidden).squeeze(1))
 
-            logits = adapter.final_logits(hidden)
+            final_hidden = adapter.normalize(hidden)
+            logits = adapter.project_logits(final_hidden)
+            state.compute_used += self.lm_head_flops_per_token() * seq_len * batch_size
 
-        router_summary = summarize_router_records(adapter.get_router_records(), top_k=adapter.cfg.num_experts_per_tok)
+        return RecurrenceResult(
+            logits=logits,
+            final_hidden=final_hidden,
+            state=state,
+        )
+
+    def lm_head_flops_per_token(self) -> float:
+        return jetmoe_lm_head_flops_per_token(self.adapter.cfg)
+
+
+class BaseLM(torch.nn.Module):
+    """Native one-pass model used as the Phase 1 control."""
+
+    scale = "base"
+
+    def __init__(self, adapter: ARCAdapter):
+        super().__init__()
+        self.adapter = adapter
+        self.transformer = adapter.hf_model
+
+    def forward(
+        self,
+        input_ids: Tensor,
+        attention_mask: Tensor | None = None,
+        position_ids: Tensor | None = None,
+    ) -> RecurrenceResult:
+        with torch.no_grad():
+            hidden, logits = self.adapter.forward_native(
+                input_ids, attention_mask=attention_mask, position_ids=position_ids
+            )
+        seq_len = input_ids.shape[1]
+        batch_size = input_ids.shape[0]
+        state = RecurrenceState(scale=self.scale, max_executions=1)
+        state.compute_used = (
+            self.adapter.unit_flops("model", 0, seq_len, batch_size=batch_size)
+            + self.lm_head_flops_per_token() * seq_len * batch_size
+        )
+        state.executions = 1
         return RecurrenceResult(
             logits=logits,
             final_hidden=hidden,
-            last_logits_history=last_logits_history,
-            trace=state.trace,
             state=state,
-            router_summary=router_summary,
-            truncated=state.truncated,
         )
 
     def lm_head_flops_per_token(self) -> float:
@@ -114,7 +121,7 @@ class ModelRecurrenceLM(RecurrentLM):
     scale = "model"
 
     def __init__(self, adapter: ARCAdapter, num_loops: int):
-        super().__init__(adapter, FixedSchedule.uniform(1, num_loops))
+        super().__init__(adapter, num_loops)
 
     def num_units(self) -> int:
         return 1
@@ -128,12 +135,6 @@ class BlockRecurrenceLM(RecurrentLM):
 
     scale = "block"
 
-    def __init__(self, adapter: ARCAdapter, schedule: FixedSchedule):
-        expected = adapter.num_blocks()
-        if len(schedule.counts) != expected:
-            raise ValueError(f"block schedule needs {expected} counts, got {len(schedule.counts)}")
-        super().__init__(adapter, schedule)
-
     def num_units(self) -> int:
         return self.adapter.num_blocks()
 
@@ -146,12 +147,6 @@ class LayerRecurrenceLM(RecurrentLM):
 
     scale = "layer"
 
-    def __init__(self, adapter: ARCAdapter, schedule: FixedSchedule):
-        expected = adapter.num_layers()
-        if len(schedule.counts) != expected:
-            raise ValueError(f"layer schedule needs {expected} counts, got {len(schedule.counts)}")
-        super().__init__(adapter, schedule)
-
     def num_units(self) -> int:
         return self.adapter.num_layers()
 
@@ -159,18 +154,14 @@ class LayerRecurrenceLM(RecurrentLM):
         return self.adapter.forward_layer(unit_index, hidden, ctx)
 
 
-def build_recurrent_model(scale: str, adapter: ARCAdapter, loops, block_size: int | None = None) -> RecurrentLM:
-    """loops: int (uniform) or list[int] (heterogeneous, one count per unit)."""
-    if isinstance(loops, int):
-        if scale == "model":
-            return ModelRecurrenceLM(adapter, loops)
-        num_units = adapter.num_blocks() if scale == "block" else adapter.num_layers()
-        return build_recurrent_model(scale, adapter, [loops] * num_units, block_size)
-    schedule = FixedSchedule.heterogeneous(loops)
+def build_recurrent_model(scale: str, adapter: ARCAdapter, recurrence: int) -> RecurrentLM:
+    """Build one of the three models with a uniform fixed recurrence value."""
+    if not isinstance(recurrence, int):
+        raise TypeError("recurrence must be an integer")
+    if scale == "model":
+        return ModelRecurrenceLM(adapter, recurrence)
     if scale == "block":
-        if block_size is not None:
-            adapter.block_size = block_size
-        return BlockRecurrenceLM(adapter, schedule)
+        return BlockRecurrenceLM(adapter, recurrence)
     if scale == "layer":
-        return LayerRecurrenceLM(adapter, schedule)
+        return LayerRecurrenceLM(adapter, recurrence)
     raise ValueError(f"unknown scale: {scale}")

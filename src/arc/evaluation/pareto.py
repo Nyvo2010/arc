@@ -1,1 +1,0 @@
-"""Pareto analysis stub."""

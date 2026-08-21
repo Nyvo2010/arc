@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -18,24 +18,10 @@ class ForwardContext:
 
 
 @dataclass
-class TraceEvent:
-    scale: str
-    unit_index: int
-    iteration: int
-    hidden_delta_cos: float
-    est_flops: float
-    latency_s: float
-
-
-@dataclass
 class RecurrenceResult:
     logits: Tensor
     final_hidden: Tensor
-    last_logits_history: list[Tensor] = field(default_factory=list)
-    trace: list[TraceEvent] = field(default_factory=list)
     state: Any = None
-    router_summary: dict | None = None
-    truncated: bool = False
 
 
 class ARCAdapter(ABC):
@@ -48,7 +34,20 @@ class ARCAdapter(ABC):
     def embed(self, input_ids: Tensor) -> Tensor: ...
 
     @abstractmethod
-    def prepare(self, hidden: Tensor) -> ForwardContext: ...
+    def forward_native(
+        self,
+        input_ids: Tensor,
+        attention_mask: Tensor | None = None,
+        position_ids: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor]: ...
+
+    @abstractmethod
+    def prepare(
+        self,
+        hidden: Tensor,
+        attention_mask: Tensor | None = None,
+        position_ids: Tensor | None = None,
+    ) -> ForwardContext: ...
 
     @abstractmethod
     def forward_layer(self, layer_idx: int, hidden: Tensor, ctx: ForwardContext) -> Tensor: ...
@@ -60,10 +59,13 @@ class ARCAdapter(ABC):
     def forward_model(self, hidden: Tensor, ctx: ForwardContext) -> Tensor: ...
 
     @abstractmethod
-    def final_logits(self, hidden: Tensor) -> Tensor: ...
+    def normalize(self, hidden: Tensor) -> Tensor: ...
 
     @abstractmethod
-    def last_token_logits(self, hidden: Tensor) -> Tensor: ...
+    def project_logits(self, normalized_hidden: Tensor) -> Tensor: ...
+
+    @abstractmethod
+    def final_logits(self, hidden: Tensor) -> Tensor: ...
 
     @abstractmethod
     def num_layers(self) -> int: ...
@@ -72,10 +74,6 @@ class ARCAdapter(ABC):
     def num_blocks(self) -> int: ...
 
     @abstractmethod
-    def begin_step(self) -> None: ...
-
-    @abstractmethod
-    def get_router_records(self) -> list[dict]: ...
-
-    @abstractmethod
-    def unit_flops(self, scale: str, unit_index: int, seq_len: int) -> float: ...
+    def unit_flops(
+        self, scale: str, unit_index: int, seq_len: int, batch_size: int = 1
+    ) -> float: ...

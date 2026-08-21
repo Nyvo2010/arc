@@ -1,8 +1,0 @@
-recurrence:
-  scale: model
-  sweeps:
-    - {name: adaptive_placeholder, loops: 2}
-  controller:
-    type: entropy_threshold
-    threshold: null
-    max_loops: 8
