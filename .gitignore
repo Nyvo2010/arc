@@ -17,8 +17,9 @@ env/
 *.pth
 *.safetensors
 *.bin
-models/
+models/jetmoe-8b/
 checkpoints/
+results/
 
 # Logs
 *.log

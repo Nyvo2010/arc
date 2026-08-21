@@ -1,4 +1,7 @@
-model_fixed:
-  recurrence_type: model
-  fixed_schedule: uniform
-  loops: [2, 4, 8]
+recurrence:
+  scale: model
+  sweeps:
+    - {name: x1, loops: 1}
+    - {name: x2, loops: 2}
+    - {name: x3, loops: 3}
+    - {name: x4, loops: 4}

@@ -1,4 +1,6 @@
-layer_fixed:
-  recurrence_type: layer
-  fixed_schedule: uniform
-  loops: [2, 4]
+recurrence:
+  scale: layer
+  sweeps:
+    - {name: x1, loops: 1}
+    - {name: x2, loops: 2}
+    - {name: hetero_mid, loops: [1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]}

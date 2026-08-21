@@ -1,4 +1,8 @@
-block_fixed:
-  recurrence_type: block
-  fixed_schedule: uniform
-  loops: [2, 4]
+recurrence:
+  scale: block
+  sweeps:
+    - {name: x1, loops: [1, 1, 1, 1, 1, 1]}
+    - {name: x2, loops: [2, 2, 2, 2, 2, 2]}
+    - {name: x4, loops: [4, 4, 4, 4, 4, 4]}
+    - {name: hetero_a, loops: [1, 2, 3, 1, 2, 1]}
+    - {name: hetero_b, loops: [3, 1, 1, 3, 1, 1]}

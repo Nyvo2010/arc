@@ -1,10 +1,23 @@
-"""Recurrence state dataclass."""
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from arc.models.base import TraceEvent
+
 
 @dataclass
 class RecurrenceState:
-    model_loops: int = 0
-    block_loops: int = 0
-    layer_loops: int = 0
+    """Runtime state of one recurrent forward pass (BUILD_PLAN section 7)."""
+
+    scale: str
+    max_executions: int
+    compute_budget: float | None = None
     compute_used: float = 0.0
-    compute_budget: float = 0.0
+    executions: int = 0
+    unit_loop_counts: dict[int, int] = field(default_factory=dict)
+    trace: list[TraceEvent] = field(default_factory=list)
+    truncated: bool = False
+
+    def record_execution(self, unit_index: int) -> None:
+        self.executions += 1
+        self.unit_loop_counts[unit_index] = self.unit_loop_counts.get(unit_index, 0) + 1

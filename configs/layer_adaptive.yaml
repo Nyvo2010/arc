@@ -1,4 +1,8 @@
-layer_adaptive:
-  recurrence_type: layer
-  controller: entropy_threshold
-  max_loops: 8
+recurrence:
+  scale: layer
+  sweeps:
+    - {name: adaptive_placeholder, loops: 1}
+  controller:
+    type: entropy_threshold
+    threshold: null
+    max_loops: 8

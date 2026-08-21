@@ -1,4 +1,8 @@
-block_adaptive:
-  recurrence_type: block
-  controller: entropy_threshold
-  max_loops: 8
+recurrence:
+  scale: block
+  sweeps:
+    - {name: adaptive_placeholder, loops: [1, 1, 1, 1, 1, 1]}
+  controller:
+    type: entropy_threshold
+    threshold: null
+    max_loops: 8

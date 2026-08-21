@@ -1,3 +1,10 @@
+benchmark:
+  name: arithmetic
+  n_problems: 200
+  seed: 123
+  single_token_answers: true
+
 evaluation:
-  benchmarks: [mmlu, hellaswag]
-  metrics: [accuracy, perplexity]
+  benchmarks: [arithmetic]
+  metrics: [accuracy, est_flops, latency]
+  perplexity: null
