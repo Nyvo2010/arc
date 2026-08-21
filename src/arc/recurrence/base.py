@@ -5,7 +5,6 @@ from abc import ABC, abstractmethod
 import torch
 from torch import Tensor
 
-from arc.compute.flops import jetmoe_lm_head_flops_per_token
 from arc.models.base import ARCAdapter, ForwardContext, RecurrenceResult
 from arc.recurrence.state import RecurrenceState
 
@@ -45,10 +44,7 @@ class RecurrentLM(torch.nn.Module, ABC):
         seq_len = hidden.shape[1]
         batch_size = hidden.shape[0]
 
-        state = RecurrenceState(
-            scale=self.scale,
-            max_executions=self.num_units() * self.recurrence,
-        )
+        state = RecurrenceState(scale=self.scale)
         with torch.no_grad():
             for unit_index in range(self.num_units()):
                 for iteration in range(self.recurrence):
@@ -65,16 +61,13 @@ class RecurrentLM(torch.nn.Module, ABC):
 
             final_hidden = adapter.normalize(hidden)
             logits = adapter.project_logits(final_hidden)
-            state.compute_used += self.lm_head_flops_per_token() * seq_len * batch_size
+            state.compute_used += adapter.lm_head_flops_per_token() * seq_len * batch_size
 
         return RecurrenceResult(
             logits=logits,
             final_hidden=final_hidden,
             state=state,
         )
-
-    def lm_head_flops_per_token(self) -> float:
-        return jetmoe_lm_head_flops_per_token(self.adapter.cfg)
 
 
 class BaseLM(torch.nn.Module):
@@ -99,10 +92,10 @@ class BaseLM(torch.nn.Module):
             )
         seq_len = input_ids.shape[1]
         batch_size = input_ids.shape[0]
-        state = RecurrenceState(scale=self.scale, max_executions=1)
+        state = RecurrenceState(scale=self.scale)
         state.compute_used = (
             self.adapter.unit_flops("model", 0, seq_len, batch_size=batch_size)
-            + self.lm_head_flops_per_token() * seq_len * batch_size
+            + self.adapter.lm_head_flops_per_token() * seq_len * batch_size
         )
         state.executions = 1
         return RecurrenceResult(
@@ -110,9 +103,6 @@ class BaseLM(torch.nn.Module):
             final_hidden=hidden,
             state=state,
         )
-
-    def lm_head_flops_per_token(self) -> float:
-        return jetmoe_lm_head_flops_per_token(self.adapter.cfg)
 
 
 class ModelRecurrenceLM(RecurrentLM):

@@ -74,6 +74,9 @@ class ARCAdapter(ABC):
     def num_blocks(self) -> int: ...
 
     @abstractmethod
+    def lm_head_flops_per_token(self) -> float: ...
+
+    @abstractmethod
     def unit_flops(
         self, scale: str, unit_index: int, seq_len: int, batch_size: int = 1
     ) -> float: ...

@@ -1,6 +1,8 @@
 # Goal
 Build ARC as a modular research codebase for studying **adaptive recurrent computation inside pretrained Mixture-of-Experts Transformers**. The implementation must support layer, block, and model recurrence independently, measure actual computation, and make it possible to compare fixed and adaptive computation at matched compute.
 The implementation is designed around free Kaggle and Google Colab tiers wherever practical. These environments are appropriate for inference, architecture development, profiling, controlled experiments, LoRA/QLoRA-scale adaptation, and controller experiments. They are not a realistic environment for pretraining a new 8–20B MoE from scratch.
+
+> **Phase 1 status:** this plan predates implementation. Phase 1 ships JetMoE-8B only (DeepSeekMoE and adaptive controllers/training are future phases), with fixed recurrence evaluated via lm-evaluation-harness on Kaggle — see README.md for the actual architecture and docs/KAGGLE_RUNBOOK.md for operations. Sections below describe the full multi-phase vision; where they disagree with the code, the code wins.
 ## Core implementation principle
 ARC separates:
 - **Depth allocation:** repeated computation through layer, block, or model recurrence.
@@ -37,19 +39,11 @@ This does **not** change the research comparison: all three mechanisms still rec
 ---
 # 3. Base-model strategy
 Use an existing open-weight MoE model rather than pretraining a new model.
-### Primary research target
-**DeepSeekMoE-16B Base**
-Reasons:
-- appropriate parameter scale for the project;
-- conventional Transformer/MoE structure;
-- clear layer boundaries;
-- useful expert routing structure;
-- large enough to make recurrence research meaningful.
-### Prototype target
+### Phase 1 target (shipped)
 **JetMoE-8B**
-Use this for fast architecture development and debugging when the larger model is too expensive for the available GPU.
-### Secondary targets
-Other modern sparse MoE architectures can be added after the ARC abstraction works. The adapter must not assume that all MoE architectures expose identical internal structures.
+Appropriate parameter scale for free-tier GPUs when 8-bit quantized; conventional Transformer/MoE structure; clear layer boundaries; useful expert routing structure; large enough to make recurrence research meaningful.
+### Future targets
+**DeepSeekMoE-16B Base** and other modern sparse MoE architectures can be added after the ARC abstraction works. The adapter must not assume that all MoE architectures expose identical internal structures.
 Base-model selection should always check:
 - license;
 - Hugging Face / Transformers support;
@@ -91,67 +85,30 @@ Use simple reproducible artifacts first:
 External tracking services are optional and must not be required for reproduction.
 ---
 # 5. Repository architecture
+Phase 1 layout (future-phase packages are created when those phases land):
 ```plain text
 arc/
 ├── README.md
 ├── pyproject.toml
 ├── configs/
 │   ├── base.yaml
-│   ├── layer_fixed.yaml
-│   ├── layer_adaptive.yaml
-│   ├── block_fixed.yaml
-│   ├── block_adaptive.yaml
-│   ├── model_fixed.yaml
-│   ├── model_adaptive.yaml
-│   ├── training.yaml
-│   └── evaluation.yaml
+│   └── kaggle.yaml
 ├── src/arc/
 │   ├── models/
 │   │   ├── base.py
-│   │   ├── deepseek_moe.py
 │   │   ├── jetmoe.py
 │   │   └── registry.py
 │   ├── recurrence/
-│   │   ├── state.py
-│   │   ├── layer.py
-│   │   ├── block.py
-│   │   ├── model.py
-│   │   └── scheduler.py
-│   ├── controllers/
 │   │   ├── base.py
-│   │   ├── rules.py
-│   │   └── features.py
-│   ├── routing/
-│   │   └── instrumentation.py
+│   │   └── state.py
 │   ├── compute/
-│   │   ├── flops.py
-│   │   ├── latency.py
-│   │   └── budget.py
-│   ├── training/
-│   │   ├── dataset.py
-│   │   ├── objectives.py
-│   │   ├── lora.py
-│   │   └── trainer.py
-│   └── evaluation/
-│       ├── benchmarks.py
-│       ├── metrics.py
-│       ├── pareto.py
-│       └── logging.py
-├── scripts/
-│   ├── benchmark.py
-│   ├── profile.py
-│   ├── train.py
-│   ├── run_recurrence_sweep.py
-│   └── analyze_results.py
-├── notebooks/
-│   ├── 00_baseline.ipynb
-│   ├── 01_model_recurrence.ipynb
-│   ├── 02_block_recurrence.ipynb
-│   └── 03_layer_recurrence.ipynb
-└── results/
-    ├── raw/
-    ├── processed/
-    └── figures/
+│   │   └── flops.py
+│   ├── common/
+│   │   └── config.py
+│   └── lmeval.py
+├── tests/
+└── docs/
+    └── KAGGLE_RUNBOOK.md
 ```
 ---
 # 6. Model adapter interface

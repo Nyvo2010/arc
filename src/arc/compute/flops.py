@@ -13,7 +13,9 @@ def jetmoe_layer_macs_per_token(cfg, seq_len: int) -> dict[str, float]:
     return {
         "moa_experts_active": k * 2 * h * kv,
         "kv_proj": h * 2 * kv,
-        "attention_scores": k * 2 * heads_dim * seq_len,
+        # QK^T + AV; num_attention_heads already includes the top-k query
+        # expansion (num_heads = k * num_key_value_heads), so no extra k factor
+        "attention_scores": 2 * heads_dim * seq_len,
         # two top-k routers per layer: one for attention (MoA), one for MLP (MoE)
         "routers": 2 * h * e,
         "moe_experts_active": k * 3 * h * f,

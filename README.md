@@ -28,7 +28,8 @@ Experiment grid: base once + each recurrent model at `R ∈ {2, 3, 4}` = **10 va
 src/arc/
 ├── models/
 │   ├── base.py        # ARCAdapter interface: embed / forward_layer / forward_block /
-│   │                  #   forward_model / normalize / project_logits / unit_flops
+│   │                  #   forward_model / normalize / project_logits / unit_flops /
+│   │                  #   lm_head_flops_per_token
 │   ├── jetmoe.py      # JetMoeAdapter (JetMoE-8B boundaries), tiny test model,
 │   │                  #   8-bit-only loader, verify_parity gate
 │   └── registry.py    # create_adapter(source) -> ARCAdapter

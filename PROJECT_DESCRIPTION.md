@@ -38,4 +38,4 @@ Important measurements include:
 **Baseline → fixed layer → adaptive layer → fixed block → adaptive block → fixed model → adaptive model → cross-scale comparison → combinations → full ARC.**
 The final architecture is deliberately an endpoint rather than an assumption: weak recurrence mechanisms should be dropped rather than retained for architectural symmetry.
 ## Source
-This page is a concise project description derived from the existing ARC research plan in Notion.<mention-page url="https://app.notion.com/p/3be53c84b650813b9b20d39d9c91ce61"/>
+This page is a concise project description derived from the internal ARC research plan.

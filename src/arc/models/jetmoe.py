@@ -5,7 +5,7 @@ import math
 import torch
 from torch import Tensor
 
-from arc.compute.flops import jetmoe_layer_flops_per_token
+from arc.compute.flops import jetmoe_layer_flops_per_token, jetmoe_lm_head_flops_per_token
 from arc.models.base import ARCAdapter, ForwardContext
 
 
@@ -87,6 +87,9 @@ class JetMoeAdapter(ARCAdapter):
     def num_blocks(self) -> int:
         return math.ceil(self.num_layers() / self.block_size)
 
+    def lm_head_flops_per_token(self) -> float:
+        return jetmoe_lm_head_flops_per_token(self.cfg)
+
     def unit_flops(
         self, scale: str, unit_index: int, seq_len: int, batch_size: int = 1
     ) -> float:
@@ -103,7 +106,7 @@ class JetMoeAdapter(ARCAdapter):
         return per_token * seq_len * batch_size * n
 
 
-def build_tiny_jetmoe(seed: int = 0, device: str | None = None):
+def build_tiny_jetmoe(seed: int = 0, device: str | None = None, attn_implementation: str | None = None):
     from transformers import JetMoeConfig, JetMoeForCausalLM
 
     cfg = JetMoeConfig(
@@ -117,6 +120,8 @@ def build_tiny_jetmoe(seed: int = 0, device: str | None = None):
         num_experts_per_tok=2,
         max_position_embeddings=128,
     )
+    if attn_implementation:
+        cfg._attn_implementation = attn_implementation
     torch.manual_seed(seed)
     model = JetMoeForCausalLM(cfg)
     if device:
@@ -142,14 +147,38 @@ def load_jetmoe(path: str, device_map: str | None = "auto"):
 @torch.no_grad()
 def verify_parity(adapter: JetMoeAdapter, seq_len: int = 16) -> dict:
     """Gate for real weights: the decomposed forward must reproduce the native
-    HF forward within numerical tolerance before any recurrence experiment."""
+    HF forward -- unmasked, padded, and chained through model recurrence x2 --
+    before any recurrence experiment."""
+    from arc.recurrence.base import build_recurrent_model
+
     torch.manual_seed(0)
     device = adapter.net.embed_tokens.weight.device
+
+    def max_diff(native: Tensor, decomposed: Tensor) -> float:
+        return float((native - decomposed).abs().max())
+
     ids = torch.randint(2, adapter.cfg.vocab_size, (1, seq_len), device=device)
+
+    # 1. unmasked single pass
     native = adapter.hf_model(input_ids=ids).logits.float()
     h = adapter.embed(ids)
-    ctx = adapter.prepare(h)
-    h = adapter.forward_model(h, ctx)
-    decomposed = adapter.final_logits(h).float()
-    max_abs = float((native - decomposed).abs().max())
+    h = adapter.forward_model(h, adapter.prepare(h))
+    max_abs = max_diff(native, adapter.final_logits(h).float())
+
+    # 2. right-padded batch with explicit mask must match its real prefix
+    pad = torch.zeros((1, 3), dtype=ids.dtype, device=device)
+    batch = torch.cat([ids, pad], dim=1)
+    mask = torch.cat([torch.ones_like(ids), torch.zeros_like(pad)], dim=1)
+    native_pad = adapter.hf_model(input_ids=batch, attention_mask=mask).logits[0, :seq_len].float()
+    h = adapter.embed(batch)
+    h = adapter.forward_model(h, adapter.prepare(h, attention_mask=mask))
+    max_abs = max(max_abs, max_diff(native_pad, adapter.final_logits(h)[0, :seq_len].float()))
+
+    # 3. R=2 model recurrence must equal two chained normalized native passes
+    out1 = adapter.net(input_ids=batch, attention_mask=mask, return_dict=True).last_hidden_state
+    out2 = adapter.net(inputs_embeds=out1, attention_mask=mask, return_dict=True).last_hidden_state
+    recurrent_native = adapter.project_logits(out2)[0, :seq_len].float()
+    result = build_recurrent_model("model", adapter, 2)(batch, attention_mask=mask)
+    max_abs = max(max_abs, max_diff(recurrent_native, result.logits[0, :seq_len].float()))
+
     return {"max_abs_diff": round(max_abs, 6), "ok": max_abs < 5e-2}

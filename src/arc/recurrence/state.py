@@ -7,7 +7,6 @@ class RecurrenceState:
     """Runtime state of one recurrent forward pass."""
 
     scale: str
-    max_executions: int
     compute_used: float = 0.0
     executions: int = 0
     unit_loop_counts: dict[int, int] = field(default_factory=dict)

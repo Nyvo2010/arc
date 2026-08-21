@@ -34,15 +34,14 @@ def test_layer_recurrence_counts(layer_adapter):
     assert result.state.unit_loop_counts == {0: 2, 1: 2}
 
 
-def test_block_recurrence_counts(block_adapter):
-    block_adapter.block_size = 1
+def test_block_recurrence_counts(block_adapter, monkeypatch):
+    monkeypatch.setattr(block_adapter, "block_size", 1)  # 2 layers -> 2 blocks
     model = build_recurrent_model("block", block_adapter, recurrence=2)
     ids = torch.randint(0, 128, (1, 8))
     result = model(ids)
 
     assert result.state.executions == 4
     assert result.state.unit_loop_counts == {0: 2, 1: 2}
-    block_adapter.block_size = 2
 
 
 def test_recurrence_changes_output(layer_adapter):

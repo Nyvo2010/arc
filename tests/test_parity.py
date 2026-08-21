@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import torch
 
+from arc.recurrence.base import build_recurrent_model
+
 
 def test_decomposed_forward_matches_native(layer_adapter, tiny_model):
     torch.manual_seed(1)
@@ -53,12 +55,8 @@ def test_layer_and_block_paths_agree(layer_adapter, block_adapter):
 
 
 def test_model_recurrence_chains_normalized_state(layer_adapter):
-    import torch.nn.functional as F
-
     ids = torch.randint(0, 128, (1, 8))
-    model = __import__("arc.recurrence", fromlist=["build_recurrent_model"]).build_recurrent_model(
-        "model", layer_adapter, recurrence=2
-    )
+    model = build_recurrent_model("model", layer_adapter, recurrence=2)
 
     with torch.no_grad():
         hidden = layer_adapter.embed(ids)
@@ -107,9 +105,7 @@ def test_result_final_hidden_is_normalized(layer_adapter):
 
 def test_model_recurrence_uses_previous_loop_state(layer_adapter):
     ids = torch.randint(0, 128, (1, 8))
-    model = __import__("arc.recurrence", fromlist=["build_recurrent_model"]).build_recurrent_model(
-        "model", layer_adapter, recurrence=2
-    )
+    model = build_recurrent_model("model", layer_adapter, recurrence=2)
     observed_inputs = []
     original = layer_adapter.forward_model
 

@@ -50,11 +50,6 @@ class ArcCausalLMShim(torch.nn.Module):
     def tie_weights(self) -> None:
         pass
 
-    def reset_compute_accounting(self) -> None:
-        self.forward_count = 0
-        self.total_flops_used = 0.0
-        self.total_executions = 0
-
 
 def _build_arc_model(scale: str, recurrence: int, path: str, device_map, block_size: int | None = None):
     from arc.models.registry import create_adapter
