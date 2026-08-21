@@ -27,7 +27,17 @@ def run_suite(
     if not variants:
         raise ValueError("at least one model variant is required")
 
-    runs = []
+    def _save(runs_so_far: list) -> None:
+        if output_path is None:
+            return
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"protocol": protocol.as_dict(), "runs": list(runs_so_far)}
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+        tmp.replace(path)
+
+    runs: list = []
     for variant in variants:
         evaluated = simple_evaluate(
             model="arc",
@@ -50,10 +60,7 @@ def run_suite(
                 "results": evaluated,
             }
         )
+        # Save after every variant so a crashed session keeps finished work.
+        _save(runs)
 
-    output = {"protocol": protocol.as_dict(), "runs": runs}
-    if output_path is not None:
-        path = Path(output_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(output, indent=2, default=str) + "\n")
-    return output
+    return {"protocol": protocol.as_dict(), "runs": runs}
