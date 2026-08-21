@@ -1,83 +1,103 @@
 # Adaptive Recurrence Computing (ARC)
 
-Can a pretrained MoE Transformer get more quality per FLOP by **allocating recurrent depth** instead of always running a fixed computation? ARC studies three recurrence scales independently at fixed recurrence values, evaluated at matched actual compute.
+Can a pretrained MoE Transformer get more quality per FLOP by **allocating recurrent depth** instead of always running a fixed computation? Phase 1 studies three recurrence scales independently at fixed recurrence values, evaluated at matched actual compute on Kaggle.
 
 - Research questions and methodology: `RESEARCH_PLAN.md`
 - Implementation contract: `BUILD_PLAN.md`
 - Short version: `PROJECT_DESCRIPTION.md`
+- Kaggle operations runbook: `docs/KAGGLE_RUNBOOK.md`
 
 ## The four Phase 1 models
 
-One shared JetMoE adapter, four runtime modes (`recurrence` is a plain integer):
+One shared JetMoE adapter, four runtime modes. `recurrence` (`R`) is a plain integer:
 
-| Model | Scale | Forward |
+| Model | `scale` | Forward |
 |---|---|---|
 | Base | `base` | one native pass (control) |
 | Layer recurrence | `layer` | each transformer layer runs `R` times, `h_{l,r+1} = F_l(h_{l,r})` |
 | Block recurrence | `block` | each contiguous block of `block_size` layers runs `R` times |
 | Model recurrence | `model` | the whole stack runs `R` times, `H_{t+1} = F(H_t)` |
 
-The hidden state always chains forward; it never restarts from `h0`. The final norm + LM head run exactly once. Kaggle comparison plan: base once, then each recurrent model at `R ∈ {2, 3, 4}`, scored on quality per estimated FLOP.
+The hidden state always chains forward and never restarts from `h0`. Between complete model loops the final RMSNorm is applied so the chained state equals a real native traversal. The final norm + LM head run exactly once per forward.
 
-## Layout
+Experiment grid: base once + each recurrent model at `R ∈ {2, 3, 4}` = **10 variants**.
+
+## Repository architecture
 
 ```text
 src/arc/
-├── models/       # ARCAdapter interface + JetMoE-8B adapter (embed / layer / block / model / logits boundaries)
-├── recurrence/   # BaseLM + the three fixed-recurrence runtimes
-├── compute/      # analytic FLOP accounting (active experts only)
-└── common/       # YAML config loading
+├── models/
+│   ├── base.py        # ARCAdapter interface: embed / forward_layer / forward_block /
+│   │                  #   forward_model / normalize / project_logits / unit_flops
+│   ├── jetmoe.py      # JetMoeAdapter (JetMoE-8B boundaries), tiny test model,
+│   │                  #   8-bit-only loader, verify_parity gate
+│   └── registry.py    # create_adapter(source) -> ARCAdapter
+├── recurrence/
+│   ├── base.py        # BaseLM (native control), the three RecurrentLM runtimes,
+│   │                  #   build_recurrent_model(scale, adapter, R)
+│   └── state.py       # RecurrenceState: executions, loop counts, compute_used
+├── compute/
+│   └── flops.py       # analytic FLOPs: 2×MACs, active experts only, seq×batch scaled
+├── common/config.py   # YAML config loading
+└── lmeval.py          # OPTIONAL lm-evaluation-harness bridge (model type "arc")
 configs/
-├── base.yaml     # local weights
-└── kaggle.yaml   # hub weights
+├── base.yaml          # local weights
+└── kaggle.yaml        # hub weights for Kaggle
+tests/                 # CPU-only suite on a random-init tiny JetMoE
+docs/KAGGLE_RUNBOOK.md # step-by-step free-tier benchmark operations
 ```
 
-All real-weight loads are **8-bit quantized** (bitsandbytes `load_in_8bit`); the random-init tiny model used in tests is the only exception. There is deliberately **no benchmark code** here; Kaggle's built-in benchmarks provide quality metrics, and every forward already reports estimated FLOPs and execution counts for the compute side.
+Everything else (benchmarks, controllers, training, other base models) is deliberately **not in this repo**; see *Development strategy* below.
 
-## Usage
+All real-weight loads are **8-bit quantized** (`bitsandbytes load_in_8bit`, `device_map="auto"`); the random-init tiny model used in tests is the only exception.
+
+## Compute accounting
+
+Every forward reports `state.executions` and `state.compute_used` — analytic FLOPs = 2×MACs with active-expert-only cost, attention score term included, scaled by sequence length × batch size × recurrence count, plus the LM-head projection counted once. The lm-eval shim accumulates totals across a whole benchmark run (`arc_model.total_flops_used`), which is the "compute" half of quality-per-compute.
+
+## Testing strategy
+
+The suite is **CPU-only** (random-init 2-layer JetMoE, ~40s total) and gates correctness at three levels:
+
+1. **Parity** (`test_parity.py`) — the decomposed adapter path must reproduce the native HF forward exactly (`< 1e-5`), including padded batches with explicit masks; model-recurrence chaining must equal two normalized native passes; `final_hidden` must be the normalized state.
+2. **Recurrence semantics** (`test_recurrence.py`) — execution counts, per-unit loop counts, output changes with depth, invalid-argument rejection, x1 recurrence ≡ base logits.
+3. **Compute accounting** (`test_units.py`) — FLOP formulas scale correctly with sequence length, batch size, and recurrence.
+4. **Benchmark bridge** (`test_lmeval.py`) — offline loglikelihood through the real harness plus a networked `simple_evaluate` round-trip that skips gracefully offline.
+
+Run everything:
 
 ```bash
-python -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest    # CPU-only tests against a random-init tiny JetMoE
+python -m venv .venv && .venv/bin/pip install -e '.[dev,lmeval]'
+.venv/bin/python -m pytest
 ```
 
-Notebook cell on Kaggle (attach this repo as a dataset/utility script + GPU accelerator):
+## Kaggle benchmark workflow
 
-```python
-!pip install -q -e .
+Kaggle's Benchmarks feature evaluates only Kaggle-hosted models, so quality metrics come from **EleutherAI's lm-evaluation-harness** driving our local weights through the registered `"arc"` backend. Full setup, commands, GPQA gating, and quota budgeting: `docs/KAGGLE_RUNBOOK.md`. Short form:
 
-import torch
-from transformers import AutoTokenizer
-from arc.common.config import load_config
-from arc.models.registry import create_adapter
-from arc.models.jetmoe import verify_parity
-from arc.recurrence import BaseLM, build_recurrent_model
-
-cfg = load_config("configs/kaggle.yaml")
-adapter = create_adapter(cfg["model"]["path"], block_size=cfg["model"]["block_size"])
-print(verify_parity(adapter))  # must print ok=True before any experiment
-
-tokenizer = AutoTokenizer.from_pretrained(cfg["model"]["path"])
-ids = tokenizer("81 / 9 =", return_tensors="pt").input_ids.to(
-    adapter.net.embed_tokens.weight.device
-)
-
-for R in (2, 3, 4):
-    for scale in ("layer", "block", "model"):
-        model = build_recurrent_model(scale, adapter, recurrence=R)
-        result = model(ids)
-        print(f"{scale} x{R}", result.state.executions, f"{result.state.compute_used:.3e}")
-
-base = BaseLM(adapter)(ids)  # control; quality comes from Kaggle's benchmarks
+```bash
+!pip install -q -e . "lm_eval[hf]"
+!arc-lm-eval --model arc \
+    --model_args scale=model,recurrence=2,path=jetmoe/jetmoe-8b \
+    --tasks mmlu,gpqa_diamond_zeroshot,hellaswag --limit 500 \
+    --batch_size auto --device cuda:0
+# then read arc_model.total_flops_used from the saved run for the compute side
 ```
 
-## Design decisions pinned so far
+### Scientific control protocol
 
-| Question | Decision |
-|---|---|
-| Layer vs block | Layer = one decoder layer. Block = contiguous segment of `block_size` layers (default 4 → 6 blocks in JetMoE-24L). Fixed per experiment set. |
-| Loop count semantics | Recurrence value `R` = total executions per unit (`R=1` ≡ native). Hidden state chains forward; never restarts from h0. |
-| Routing | JetMoE's native router runs on every repeated layer execution; no diversity objectives or routing changes are introduced. |
-| Compute metric | FLOPs = 2×MACs, active experts only (top-k), attention score term included; lm_head counted once per forward. |
+Within an experiment set, **everything stays constant except the evaluated variant**: identical tokenizer, tasks, few-shot counts, limits, seeds, quantization, batch settings, and hardware. Only `scale` and `recurrence` change between runs — they are the independent variables. Quality comes from the harness; compute comes from `total_flops_used`; report accuracy per FLOP.
 
-Raw research docs (`BUILD_PLAN.md`, `RESEARCH_PLAN.md`, `PROJECT_DESCRIPTION.md`) describe the full program including later adaptive phases; this repository intentionally contains only the Phase 1 models.
+## Development strategy / where things go
+
+Phase discipline keeps attribution clean — each phase adds code only where it belongs:
+
+| Concern | Lives in | Status |
+|---|---|---|
+| New base-model adapters (DeepSeekMoE etc.) | `src/arc/models/<name>.py` + registry branch | future phase |
+| Adaptive HALT/CONTINUE controllers | `src/arc/controllers/` | later phase |
+| Recurrence-aware LoRA training | `src/arc/training/` | after untrained comparison |
+| Benchmark task definitions | never here — use lm-eval tasks or Kaggle datasets | n/a |
+| Result aggregation notebooks | Kaggle notebook, outputs to `/kaggle/working` | per experiment |
+
+When a future phase lands, recreate its package rather than growing the model files; the adapter interface in `models/base.py` is the stable contract between phases.
