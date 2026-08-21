@@ -47,16 +47,47 @@ class ArcCausalLMShim(torch.nn.Module):
         self.total_executions += int(result.state.executions)
         return SimpleNamespace(logits=result.logits)
 
+    @torch.no_grad()
+    def generate(
+        self,
+        input_ids: Tensor,
+        max_length: int,
+        stopping_criteria=None,
+        do_sample: bool = False,
+        **_,
+    ) -> Tensor:
+        """Greedy decoding loop for generative tasks (mmlu_pro CoT).
+
+        Recomputes the full forward per token (no KV cache); slow but exact
+        and identical across variants. FLOPs flow through ``forward``.
+        """
+        if do_sample:
+            raise NotImplementedError("ARC benchmark protocol is greedy-only")
+        ids = input_ids
+        while ids.shape[1] < max_length:
+            logits = self.forward(ids).logits[:, -1, :]
+            ids = torch.cat([ids, logits.argmax(dim=-1, keepdim=True)], dim=1)
+            if stopping_criteria is not None and any(c(ids, None) for c in stopping_criteria):
+                break
+        return ids
+
     def tie_weights(self) -> None:
         pass
 
 
-def _build_arc_model(scale: str, recurrence: int, path: str, device_map, block_size: int | None = None):
+def _build_arc_model(
+    scale: str,
+    recurrence: int,
+    path: str,
+    device_map,
+    block_size: int | None = None,
+    architecture: str = "jetmoe",
+):
     from arc.models.registry import create_adapter
     from arc.recurrence.base import BaseLM, build_recurrent_model
 
     kwargs = {} if block_size is None else {"block_size": block_size}
-    adapter = create_adapter(path, device_map=device_map, **kwargs)
+    adapter = create_adapter(path, device_map=device_map, architecture=architecture, **kwargs)
     if scale == "base":
         return BaseLM(adapter)
     return build_recurrent_model(scale, adapter, recurrence)
@@ -83,12 +114,15 @@ class ArcLM(HFLM):
             --tasks mmlu,gpqa_diamond_zeroshot --limit 500
     """
 
+    last_instance: "ArcLM | None" = None
+
     def __init__(
         self,
         scale: str = "base",
         recurrence: int = 1,
         path: str = "tiny",
         block_size: int | None = None,
+        architecture: str = "jetmoe",
         device_map: str | None = None,
         tokenizer_path: str | None = None,
         tokenizer=None,
@@ -97,10 +131,14 @@ class ArcLM(HFLM):
         """ARC-specific args are popped first; everything else (batch_size,
         max_length, add_bos_token, ...) is forwarded verbatim to HFLM so the
         lm-eval CLI can keep passing --batch_size itself."""
+        scale = {"l": "layer", "b": "block", "m": "model"}.get(scale, scale)
         if scale not in ("base", "layer", "block", "model"):
             raise ValueError(f"unknown scale: {scale}")
-        arc_lm = _build_arc_model(scale, int(recurrence), path, device_map, block_size)
+        arc_lm = _build_arc_model(
+            scale, int(recurrence), path, device_map, block_size, architecture
+        )
         self.arc_model = ArcCausalLMShim(arc_lm)
+        ArcLM.last_instance = self
         # lets HFLM fall back to AutoTokenizer.from_pretrained(path)
         self.arc_model.name_or_path = path
         tok_src = tokenizer if tokenizer is not None else tokenizer_path

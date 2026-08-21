@@ -18,6 +18,7 @@ lmeval = ["lm-eval[hf]>=0.4.12"]
 
 [project.scripts]
 arc-lm-eval = "arc.lmeval:cli"
+arc-benchmark = "arc.benchmarks.cli:main"
 
 [build-system]
 requires = ["hatchling"]

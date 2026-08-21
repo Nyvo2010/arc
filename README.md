@@ -4,6 +4,7 @@ Can a pretrained MoE Transformer get more quality per FLOP by **allocating recur
 
 - Research questions and methodology: `RESEARCH_PLAN.md`
 - Implementation contract: `BUILD_PLAN.md`
+- Universal adapter & benchmarking contract: `docs/ADAPTER_CONTRACT.md`
 - Short version: `PROJECT_DESCRIPTION.md`
 - Kaggle operations runbook: `docs/KAGGLE_RUNBOOK.md`
 
@@ -40,6 +41,11 @@ src/arc/
 ├── compute/
 │   └── flops.py       # analytic FLOPs: 2×MACs, active experts only, seq×batch scaled
 ├── common/config.py   # YAML config loading
+├── benchmarks/
+│   ├── protocol.py    # ModelVariant (the only allowed variables) +
+│   │                  #   BenchmarkProtocol (frozen tasks/seeds/batch/device)
+│   ├── runner.py      # run_suite: one harness config for all variants
+│   └── cli.py         # arc-benchmark console entry point
 └── lmeval.py          # OPTIONAL lm-evaluation-harness bridge (model type "arc")
 configs/
 ├── base.yaml          # local weights
@@ -72,22 +78,21 @@ python -m venv .venv && .venv/bin/pip install -e '.[dev,lmeval]'
 .venv/bin/python -m pytest
 ```
 
-## Kaggle benchmark workflow
+## Kaggle Notebook benchmark workflow
 
-Kaggle's Benchmarks feature evaluates only Kaggle-hosted models, so quality metrics come from **EleutherAI's lm-evaluation-harness** driving our local weights through the registered `"arc"` backend. Full setup, commands, GPQA gating, and quota budgeting: `docs/KAGGLE_RUNBOOK.md`. Short form:
+The repository provides one universal `lm-eval` backend and one fixed benchmark protocol for every architecture and variant. A Kaggle Notebook runs that protocol against Kaggle-hosted or otherwise available weights. This is a reproducible notebook experiment; it is not an automatic submission to Kaggle's hosted Benchmarks leaderboard. Full setup and quota budgeting: `docs/KAGGLE_RUNBOOK.md`.
 
 ```bash
 !pip install -q -e . "lm_eval[hf]"
-!arc-lm-eval --model arc \
-    --model_args scale=model,recurrence=2,path=jetmoe/jetmoe-8b \
-    --tasks mmlu,gpqa_diamond_zeroshot,hellaswag --limit 500 \
-    --batch_size auto:2 --device cuda:0
-# then read arc_model.total_flops_used from the saved run for the compute side
+!arc-benchmark --path jetmoe/jetmoe-8b --limit 500 \
+    --output /kaggle/working/arc-benchmark.json
 ```
+
+The benchmark runner evaluates the base control plus `l`, `b`, and `m` at recurrence 2, 3, and 4. Future architectures add an adapter under `src/arc/models/` and a registry branch; the runner and inference engine do not change.
 
 ### Scientific control protocol
 
-Within an experiment set, **everything stays constant except the evaluated variant**: identical tokenizer, tasks, few-shot counts, limits, seeds, quantization, batch settings, and hardware. Only `scale` and `recurrence` change between runs — they are the independent variables. Quality comes from the harness; compute comes from `total_flops_used`; report accuracy per FLOP.
+Within an experiment set, **everything stays constant except the evaluated model variant**: identical tokenizer, tasks, few-shot counts, limits, seeds, quantization, batch settings, and hardware. The variant may change architecture, weights, recurrence scale (`l`, `b`, or `m`), and recurrence count. Quality comes from the harness; compute comes from `total_flops_used`; report accuracy per FLOP.
 
 ## Development strategy / where things go
 

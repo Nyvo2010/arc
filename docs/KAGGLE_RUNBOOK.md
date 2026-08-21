@@ -1,4 +1,4 @@
-# Kaggle Runbook — Phase 1 quality-per-compute experiments
+# Kaggle Notebook Runbook — ARC quality-per-compute experiments
 
 Free-tier facts (verified 2026-08): **30 GPU-hours/week** (resets Sat 00:00 UTC), sessions up to **12h**, hardware = P100 (16GB) or T4 x2, internet toggle required (phone-verified account), `/kaggle/working` = 20GB auto-saved. JetMoE-8B int8 fits either GPU; prefer **T4 x2**.
 
@@ -26,17 +26,9 @@ The repo reaches the notebook by attaching the GitHub repo as a Kaggle dataset/u
 10 variants — base once + layer/block/model at R ∈ {2, 3, 4}:
 
 ```bash
-# base control (R is irrelevant; runs exactly one native pass)
-arc-lm-eval --model arc --model_args scale=base,path=jetmoe/jetmoe-8b \
-    --tasks mmlu,gpqa_diamond_zeroshot,hellaswag --limit 500 \
-    --batch_size auto:2 --device cuda:0
-
-# recurrent variants — ONLY scale and recurrence change
-for S in layer block model; do for R in 2 3 4; do
-arc-lm-eval --model arc --model_args scale=$S,recurrence=$R,path=jetmoe/jetmoe-8b \
-    --tasks mmlu,gpqa_diamond_zeroshot,hellaswag --limit 500 \
-    --batch_size auto:2 --device cuda:0 --output_path /kaggle/working/${S}_x${R}
-done; done
+# base control plus l (layer), b (block), and m (model) recurrence variants
+arc-benchmark --path jetmoe/jetmoe-8b --limit 500 \
+    --output /kaggle/working/arc-benchmark.json
 ```
 
 Before burning quota on a variant, run the parity gate:
@@ -56,10 +48,11 @@ print(verify_parity(adapter))   # must print ok=True before any experiment
 
 Everything constant except the evaluated variant. Within one experiment set:
 
-- identical task list, `--limit`, few-shot settings (`--num_fewshot` if used), seeds (`--seed 1234`)
-- identical tokenizer (same `path`, hence same tokenizer), same int8 quantization path
-- identical batch/device configuration per comparable pair where feasible
-- **only `scale` and `recurrence` differ**
+- identical task list: `mmlu`, `mmlu_pro`, `gpqa_main`, `gpqa_diamond_zeroshot`
+- zero-shot evaluation (`num_fewshot=0`), identical limit and seeds
+- identical tokenizer and int8 loading policy
+- identical batch/device configuration
+- **only the model variant differs**: architecture, weights, recurrence mode (`l`, `b`, `m`), or recurrence count
 
 Record for every run: harness metrics (JSON in output dir) + `arc_model.total_flops_used` / `total_executions`. Quality-per-compute = accuracy ÷ total FLOPs.
 
@@ -80,4 +73,6 @@ Plan: pilot the whole grid at `--limit 100` first (~1 session), then scale the w
 - Only loglikelihood/MCQ tasks work (`mmlu*`, `gpqa*`, `hellaswag`, `arc_*`, `piqa`, `boolq`, `winogrande`, `lambada_openai`). Generative tasks need `generate()`, which ARC wrappers do not implement.
 - `lm-eval ls tasks` lists everything.
 - If OOM: drop to `--batch_size 1`; int8 JetMoE needs headroom beyond its ~9GB of weights.
-- Session died mid-grid? Rerun only missing variants — outputs are per-variant directories.
+- Session died mid-grid? Rerun the universal command; the output is one normalized JSON artifact.
+
+Kaggle's hosted Benchmarks product requires separately registered Kaggle model versions. The command above is a Kaggle Notebook execution of the repository's universal `lm-eval` adapter and does not automatically publish a hosted leaderboard result. Full contract details: `docs/ADAPTER_CONTRACT.md`.
