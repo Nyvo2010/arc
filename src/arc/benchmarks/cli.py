@@ -20,3 +20,7 @@ def main() -> None:
         for recurrence in (2, 3, 4)
     ]
     run_suite(variants, BenchmarkProtocol(limit=args.limit), args.output)
+
+
+if __name__ == "__main__":
+    main()
