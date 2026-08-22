@@ -20,6 +20,7 @@ env/
 models/jetmoe-8b/
 checkpoints/
 results/
+prompts/
 
 # Logs
 *.log
@@ -28,3 +29,8 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# pytest
+.pytest_cache/
+coverage.xml
+.htmlcov/

@@ -5,15 +5,22 @@
 All variants share the same `ARCAdapter` interface and inference signature:
 `model(input_ids, attention_mask=None, position_ids=None) -> RecurrenceResult`
 
-| Name | Scale | Adaptive | Builder |
+|Name|Scale|Adaptive|Builder|
 |---|---|---|---|
-| base | base | False | `build_arc_model(source, scale='base')` |
-| model_fixed | model | False | `scale='model', adaptive=False, recurrence=R` |
-| block_fixed | block | False | `scale='block', adaptive=False, recurrence=R` |
-| layer_fixed | layer | False | `scale='layer', adaptive=False, recurrence=R` |
-| model_adaptive | model | True | `scale='model', adaptive=True, max_loops=M` |
-| block_adaptive | block | True | `scale='block', adaptive=True, max_loops=M` |
-| layer_adaptive | layer | True | `scale='layer', adaptive=True, max_loops=M` |
+|base|base|False|`build_arc_model(source, scale='base')`|
+|model_fixed|model|False|`scale='model', adaptive=False, recurrence=R`|
+|block_fixed|block|False|`scale='block', adaptive=False, recurrence=R`|
+|layer_fixed|layer|False|`scale='layer', adaptive=False, recurrence=R`|
+|model_adaptive|model|True|`scale='model', adaptive=True, max_loops=M`|
+|block_adaptive|block|True|`scale='block', adaptive=True, max_loops=M`|
+|layer_adaptive|layer|True|`scale='layer', adaptive=True, max_loops=M`|
+
+## Production ready
+
+- Tests: `tests/test_parity.py`, `tests/test_smoke.py`, `tests/test_contract.py`
+- Benchmarks: CSV runners + `lm-evaluation-harness` bridge for free community tasks
+- Kaggle scripts: `run_benchmarks.sh`, `run_lm_eval.sh`
+- Packaging: `pyproject.toml` with dev deps
 
 ## Adapter Contract
 
