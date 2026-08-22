@@ -15,11 +15,21 @@ export PIPELINE_TIMEOUT=1800   # 30 min per stage max
 # --- Preflight ---
 echo "[INFO] Python: $(python3 --version)"
 python3 - <<'PY'
-import sys
+import sys, json
+from pathlib import Path
 if sys.version_info < (3,11):
     print("[ERROR] Python >=3.11 required")
     sys.exit(1)
 print(f"[INFO] Python {sys.version.split()[0]} ok, executable {sys.executable}")
+
+# Log git commit for reproducibility
+try:
+    import subprocess
+    commit = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
+    print(f"[INFO] git commit {commit}")
+    Path('/kaggle/working').joinpath('git_commit.txt').write_text(commit)
+except Exception as e:
+    print(f"[WARN] git commit not found: {e}")
 PY
 
 if python3 -c 'import torch; print(torch.cuda.is_available())' 2>/dev/null | grep -q True; then
