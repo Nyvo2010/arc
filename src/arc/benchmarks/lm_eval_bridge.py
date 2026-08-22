@@ -48,33 +48,33 @@ class ARCLoglikelihoodWrapper:
         """
         results = []
         for prompt, cont in requests:
+            # Build full input for model
             input_ids = torch.tensor([prompt + cont], dtype=torch.long)
             if self.device != "cpu":
                 input_ids = input_ids.to(self.device)
             res = self.engine(input_ids)
-            logits = res.logits
-            # simple logprob for the continuation tokens
-            # We compute sum of log softmax over the continuation positions
-            with torch.no_grad():
-                log_probs = torch.log_softmax(logits, dim=-1)
-                # gather logprob for true continuation tokens
-                # continuation tokens align with logits[:, -len(cont):]
-                start = logits.shape[1] - len(cont)
-                if start < 0:
-                    # fallback: use whole logits
-                    target = torch.tensor([prompt + cont], dtype=torch.long, device=logits.device)
+            logits = res.logits  # [1, T, V]
+            # Compute log softmax over vocab
+            log_probs = torch.log_softmax(logits, dim=-1)
+            # Align logits to continuation tokens
+            # logits at position t predicts token t+1; for full sequence prompt+cont,
+            # the continuation tokens correspond to logits at positions len(prompt) .. len(prompt)+len(cont)-1
+            start = len(prompt)
+            end = start + len(cont)
+            if len(cont) == 0:
+                logprob = 0.0
+            else:
+                # Clip to available logits
+                valid_len = max(0, min(len(cont), logits.shape[1] - start))
+                if valid_len <= 0:
+                    logprob = float("-inf")
                 else:
-                    target = torch.tensor([cont], dtype=torch.long, device=logits.device)
-                # Compute mean logprob for the continuation
-                # For simplicity, take the last len(cont) positions
-                selected = log_probs[0, -len(cont):, :]
-                # Gather
-                if len(cont) > 0:
-                    token_ids = torch.tensor(cont, device=logits.device).unsqueeze(0)
-                    gathered = torch.gather(selected.unsqueeze(0), 2, token_ids.unsqueeze(1).unsqueeze(2).expand(-1, -1, selected.shape[-1]))
-                else:
-                    gathered = torch.tensor([0.0])
-                logprob = float(gathered.sum().item()) if len(cont) > 0 else 0.0
+                    target_ids = torch.tensor(cont[:valid_len], dtype=torch.long, device=log_probs.device).unsqueeze(0)
+                    # log_probs shape [1, T, V]; select slice
+                    selected = log_probs[0, start:start+valid_len, :]  # [valid_len, V]
+                    # gather logprobs for true tokens
+                    gathered = selected[torch.arange(valid_len, device=log_probs.device), target_ids.squeeze(0)]
+                    logprob = float(gathered.sum().item())
             results.append((logprob, True))
         return results
 

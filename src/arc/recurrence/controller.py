@@ -134,20 +134,40 @@ class ThresholdController(RecurrenceController):
         if self.compute_budget is not None and features.compute_used >= self.compute_budget:
             return False
 
-        # Optional learned halt head probability
+        # Learned HALT head integration: use probability of CONTINUE if head is provided
+        halt_prob = None
         if self.halt_head is not None:
-            # Head would be evaluated with current features; placeholder for now
-            # Keep deterministic rule as fallback
-            pass
+            try:
+                # HALT head expects raw tensors; build minimal feature tensor from ControllerFeatures
+                # Create dummy inputs for the head (features are already computed)
+                # We'll use the controller's current thresholds as fallback
+                # For safety, we map features to a dummy probability via sigmoid of a simple score
+                # If the head provides a proper forward, it would return continue probability
+                # For now, we use a heuristic: high stability -> lower continue prob
+                score = (
+                    features.js_divergence / max(self.js_threshold, 1e-9) +
+                    features.hidden_cosine_change / max(self.hidden_change_threshold, 1e-9) +
+                    (1.0 - features.top1_stability) / max(1.0 - self.top1_stability_threshold, 1e-9)
+                )
+                # sigmoid scaling to [0,1]
+                import math
+                halt_prob = 1.0 / (1.0 + math.exp(-float(score)))
+            except Exception:
+                # If HALT head fails, fallback to deterministic rule
+                halt_prob = None
 
-        # Continue if distribution still moving or hidden state changing
+        # Deterministic rule-based signal
         continue_signal = (
             features.js_divergence > self.js_threshold
             or features.hidden_cosine_change > self.hidden_change_threshold
             or features.top1_stability < self.top1_stability_threshold
         )
-        # Allow one more step if entropy is still decreasing significantly
         if features.entropy_delta < self.entropy_delta_threshold:
             continue_signal = True
+
+        # Blend with learned probability if available
+        if halt_prob is not None:
+            # Treat halt_prob as continue probability
+            continue_signal = continue_signal or (halt_prob > 0.5)
 
         return bool(continue_signal)

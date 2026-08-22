@@ -28,6 +28,11 @@ class InferenceEngine:
         controller_kwargs: dict | None = None,
         seed: int = 0,
     ):
+        import logging
+        logger = logging.getLogger(__name__)
+        if not logger.handlers:
+            logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+        logger.info("InferenceEngine init variant=%s source=%s", variant, source)
         from arc.models.registry import MODEL_VARIANTS
         if variant not in MODEL_VARIANTS:
             raise ValueError(f"unknown variant {variant}")
@@ -72,18 +77,27 @@ class InferenceEngine:
         return res.logits, res.state
 
     def measure(self, input_ids: Tensor, attention_mask: Tensor | None = None, position_ids: Tensor | None = None):
-        import time
+        import logging, time
+        logger = logging.getLogger(__name__)
+        if not logger.handlers:
+            logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+        logger.info("InferenceEngine.measure start")
         t0 = time.perf_counter()
-        res = self.__call__(input_ids, attention_mask, position_ids)
+        try:
+            res = self.__call__(input_ids, attention_mask, position_ids)
+        except Exception as e:
+            logger.error("Inference call failed: %s", e)
+            raise
         t1 = time.perf_counter()
         state = res.state
         metrics = {
-            "logits": res.logits,
-            "final_hidden": res.final_hidden,
             "compute_used": float(state.compute_used),
             "executions": int(state.executions),
             "unit_loop_counts": {int(k): int(v) for k, v in state.unit_loop_counts.items()},
             "elapsed_s": t1 - t0,
             "tokens": int(input_ids.numel()),
+            "logits_shape": tuple(res.logits.shape),
+            "final_hidden_shape": tuple(res.final_hidden.shape),
         }
+        logger.info("InferenceEngine.measure done in %.4fs tokens=%d", metrics["elapsed_s"], metrics["tokens"])
         return metrics

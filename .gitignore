@@ -1,8 +1,10 @@
 # Python
 __pycache__/
+*.pyc
 *.py[cod]
 *$py.class
 *.so
+
 .env
 .venv/
 venv/
@@ -19,11 +21,10 @@ env/
 *.bin
 models/jetmoe-8b/
 checkpoints/
+
+.kaggle/
 results/
 prompts/
-
-# Logs
-*.log
 logs/
 
 # OS
@@ -34,3 +35,8 @@ Thumbs.db
 .pytest_cache/
 coverage.xml
 .htmlcov/
+
+# outputs
+*.csv
+*.json
+*.log
