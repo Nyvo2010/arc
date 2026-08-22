@@ -5,8 +5,23 @@ import math
 import torch
 from torch import Tensor
 
-from arc.compute.flops import jetmoe_layer_flops_per_token, jetmoe_lm_head_flops_per_token
 from arc.models.base import ARCAdapter, ForwardContext
+
+
+def _layer_flops_per_token(cfg) -> float:
+    hidden = int(getattr(cfg, "hidden_size", 768))
+    inter = int(getattr(cfg, "intermediate_size", 3072))
+    # rough MoE aware estimate: attention + mlp
+    # attention ~ 4*hidden^2 per token
+    attn = 4 * hidden * hidden
+    mlp = 2 * hidden * inter
+    return float(attn + mlp)
+
+
+def _lm_head_flops_per_token(cfg) -> float:
+    hidden = int(getattr(cfg, "hidden_size", 768))
+    vocab = int(getattr(cfg, "vocab_size", 32000))
+    return float(2 * hidden * vocab)
 
 
 class JetMoeAdapter(ARCAdapter):
@@ -53,13 +68,13 @@ class JetMoeAdapter(ARCAdapter):
         return ForwardContext(position_ids=position_ids, attention_mask=causal_mask)
 
     def forward_layer(self, layer_idx: int, hidden: Tensor, ctx: ForwardContext) -> Tensor:
-        outputs = self.net.layers[layer_idx](
+        out = self.net.layers[layer_idx](
             hidden,
             position_ids=ctx.position_ids,
             attention_mask=ctx.attention_mask,
             use_cache=False,
         )
-        return outputs[0]
+        return out[0] if isinstance(out, tuple) else out
 
     def forward_block(self, block_idx: int, hidden: Tensor, ctx: ForwardContext) -> Tensor:
         start = block_idx * self.block_size
@@ -89,12 +104,12 @@ class JetMoeAdapter(ARCAdapter):
         return math.ceil(self.num_layers() / self.block_size)
 
     def lm_head_flops_per_token(self) -> float:
-        return jetmoe_lm_head_flops_per_token(self.cfg)
+        return _lm_head_flops_per_token(self.cfg)
 
     def unit_flops(
         self, scale: str, unit_index: int, seq_len: int, batch_size: int = 1
     ) -> float:
-        per_token = jetmoe_layer_flops_per_token(self.cfg, seq_len)
+        per_token = _layer_flops_per_token(self.cfg)
         if scale == "layer":
             n = 1
         elif scale == "block":
@@ -150,8 +165,6 @@ def verify_parity(adapter: JetMoeAdapter, seq_len: int = 16) -> dict:
     """Gate for real weights: the decomposed forward must reproduce the native
     HF forward -- unmasked, padded, and chained through model recurrence x2 --
     before any recurrence experiment."""
-    from arc.recurrence.base import build_recurrent_model
-
     torch.manual_seed(0)
     device = adapter.net.embed_tokens.weight.device
 
@@ -179,7 +192,10 @@ def verify_parity(adapter: JetMoeAdapter, seq_len: int = 16) -> dict:
     out1 = adapter.net(input_ids=batch, attention_mask=mask, return_dict=True).last_hidden_state
     out2 = adapter.net(inputs_embeds=out1, attention_mask=mask, return_dict=True).last_hidden_state
     recurrent_native = adapter.project_logits(out2)[0, :seq_len].float()
-    result = build_recurrent_model("model", adapter, 2)(batch, attention_mask=mask)
+    # Build a simple recurrent model using builder
+    from arc.recurrence.builder import build_model
+    recurrent = build_model(scale="model", adapter=adapter, adaptive=False, recurrence=2)
+    result = recurrent(batch, attention_mask=mask)
     max_abs = max(max_abs, max_diff(recurrent_native, result.logits[0, :seq_len].float()))
 
     return {"max_abs_diff": round(max_abs, 6), "ok": max_abs < 5e-2}
