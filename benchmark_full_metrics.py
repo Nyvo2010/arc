@@ -59,6 +59,8 @@ def evaluate_variant_full(
     executions_sum = 0
     ram_samples = []
     results = []
+    # For adaptive models, track average recurrence per unit
+    per_prompt_recurrence = []
 
     for ids in prompts:
         ids_dev = ids.to(device) if device != "cpu" else ids
@@ -76,6 +78,14 @@ def evaluate_variant_full(
         executions_sum += metrics["executions"]
         ram_samples.append(max(ram_before, ram_after))
 
+        # Compute average recurrence per unit for adaptive models
+        unit_counts = metrics["unit_loop_counts"]
+        if unit_counts:
+            avg_rec = sum(unit_counts.values()) / len(unit_counts)
+        else:
+            avg_rec = 0.0
+        per_prompt_recurrence.append(avg_rec)
+
         results.append({
             "compute_used": metrics["compute_used"],
             "executions": metrics["executions"],
@@ -83,6 +93,7 @@ def evaluate_variant_full(
             "tokens": metrics["tokens"],
             "unit_loop_counts": metrics["unit_loop_counts"],
             "ram_gb": max(ram_before, ram_after),
+            "avg_recurrence_per_unit": avg_rec,
         })
 
     avg_time = total_time / len(prompts) if prompts else 0.0
@@ -91,6 +102,7 @@ def evaluate_variant_full(
     tokens_per_s = total_tokens_in / total_time if total_time > 0 else 0.0
     avg_ram = sum(ram_samples) / len(ram_samples) if ram_samples else 0.0
     max_ram = max(ram_samples) if ram_samples else 0.0
+    avg_recurrence_per_unit = sum(per_prompt_recurrence) / len(per_prompt_recurrence) if per_prompt_recurrence else 0.0
 
     cfg = MODEL_VARIANTS[variant]
     return {
@@ -107,6 +119,7 @@ def evaluate_variant_full(
         "max_ram_gb": max_ram,
         "total_tokens_in": total_tokens_in,
         "total_tokens_out": total_tokens_out,
+        "avg_recurrence_per_unit": avg_recurrence_per_unit,
         "per_prompt": results,
     }
 
@@ -143,6 +156,7 @@ def main():
             "max_ram_gb": res["max_ram_gb"],
             "total_tokens_in": res["total_tokens_in"],
             "total_tokens_out": res["total_tokens_out"],
+            "avg_recurrence_per_unit": res["avg_recurrence_per_unit"],
         })
         detail_path = Path(args.output).with_name(f"{args.output}.detail.{v}.jsonl")
         with detail_path.open("w") as f:
@@ -150,7 +164,7 @@ def main():
                 f.write(json.dumps({"prompt_index": i, **p}) + "\n")
 
     with Path(args.output).open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["variant","scale","adaptive","num_prompts","avg_time_s","tokens_per_s","total_flops","avg_flops_per_prompt","avg_executions","avg_ram_gb","max_ram_gb","total_tokens_in","total_tokens_out"])
+        writer = csv.DictWriter(f, fieldnames=["variant","scale","adaptive","num_prompts","avg_time_s","tokens_per_s","total_flops","avg_flops_per_prompt","avg_executions","avg_ram_gb","max_ram_gb","total_tokens_in","total_tokens_out","avg_recurrence_per_unit"])
         writer.writeheader()
         writer.writerows(rows)
 

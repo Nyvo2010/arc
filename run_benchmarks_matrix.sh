@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Kaggle matrix run for ARC 7 variants
-# Fixed variants tested with 3 iteration counts: 2, 4, 8
+# Fixed variants tested with 3 iteration counts: 2, 3, 4
 # Adaptive variants use max_loops 4
 
 MODEL_PATH=${1:-/kaggle/working/models/jetmoe-8b}
@@ -18,7 +18,7 @@ FIXED_VARIANTS=(model_fixed block_fixed layer_fixed)
 ADAPTIVE_VARIANTS=(model_adaptive block_adaptive layer_adaptive)
 BASE_VARIANT=(base)
 
-RECURRENCES=(2 4 8)
+RECURRENCES=(2 3 4)
 
 # Base
 python benchmark.py \
