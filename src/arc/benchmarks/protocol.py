@@ -40,7 +40,6 @@ class BenchmarkProtocol:
 
     tasks: tuple[str, ...] = (
         "mmlu",
-        "mmlu_pro",
         "gpqa_main_zeroshot",
         "gpqa_diamond_zeroshot",
     )

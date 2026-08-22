@@ -91,29 +91,6 @@ def test_compute_accounting_respects_recurrence(tokenizer):
     assert recurrent_flops == pytest.approx(2 * base_flops, rel=0.05)
 
 
-def test_shim_greedy_generate(tiny_arc_lm):
-    shim = tiny_arc_lm.arc_model
-    ids = tiny_arc_lm.tokenizer("2 + 2 =", return_tensors="pt").input_ids
-
-    out = shim.generate(input_ids=ids, max_length=ids.shape[1] + 3)
-    assert out.shape == (1, ids.shape[1] + 3)
-
-    # greedy decoding is deterministic
-    again = shim.generate(input_ids=ids, max_length=ids.shape[1] + 3)
-    assert torch.equal(out, again)
-
-    # accounting flows through the same forward path
-    flops_before = shim.total_flops_used
-    shim.generate(input_ids=ids, max_length=ids.shape[1] + 1)
-    assert shim.total_flops_used > flops_before
-
-
-def test_shim_generate_rejects_sampling(tiny_arc_lm):
-    ids = tiny_arc_lm.tokenizer("2 + 2 =", return_tensors="pt").input_ids
-    with pytest.raises(NotImplementedError, match="greedy-only"):
-        tiny_arc_lm.arc_model.generate(input_ids=ids, max_length=ids.shape[1] + 1, do_sample=True)
-
-
 def test_simple_evaluate_end_to_end(tiny_arc_lm):
     """Full harness round-trip on a real task. Skips without internet."""
     try:

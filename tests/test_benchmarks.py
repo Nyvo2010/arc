@@ -33,7 +33,6 @@ def test_protocol_contains_required_tasks_and_zero_shot():
     protocol = BenchmarkProtocol()
     assert protocol.tasks == (
         "mmlu",
-        "mmlu_pro",
         "gpqa_main_zeroshot",
         "gpqa_diamond_zeroshot",
     )

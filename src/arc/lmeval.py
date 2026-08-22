@@ -47,30 +47,6 @@ class ArcCausalLMShim(torch.nn.Module):
         self.total_executions += int(result.state.executions)
         return SimpleNamespace(logits=result.logits)
 
-    @torch.no_grad()
-    def generate(
-        self,
-        input_ids: Tensor,
-        max_length: int,
-        stopping_criteria=None,
-        do_sample: bool = False,
-        **_,
-    ) -> Tensor:
-        """Greedy decoding loop for generative tasks (mmlu_pro CoT).
-
-        Recomputes the full forward per token (no KV cache); slow but exact
-        and identical across variants. FLOPs flow through ``forward``.
-        """
-        if do_sample:
-            raise NotImplementedError("ARC benchmark protocol is greedy-only")
-        ids = input_ids
-        while ids.shape[1] < max_length:
-            logits = self.forward(ids).logits[:, -1, :]
-            ids = torch.cat([ids, logits.argmax(dim=-1, keepdim=True)], dim=1)
-            if stopping_criteria is not None and any(c(ids, None) for c in stopping_criteria):
-                break
-        return ids
-
     def tie_weights(self) -> None:
         pass
 

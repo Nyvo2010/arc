@@ -48,7 +48,7 @@ print(verify_parity(adapter))   # must print ok=True before any experiment
 
 Everything constant except the evaluated variant. Within one experiment set:
 
-- identical task list: `mmlu`, `mmlu_pro`, `gpqa_main`, `gpqa_diamond_zeroshot`
+- identical task list: `mmlu`, `gpqa_main_zeroshot`, `gpqa_diamond_zeroshot`
 - zero-shot evaluation (`num_fewshot=0`), identical limit and seeds
 - identical tokenizer and int8 loading policy
 - identical batch/device configuration

@@ -43,19 +43,16 @@ CLI flags — that keeps the invariant enforceable in one place.
 
 Defaults, pinned by construction:
 
-- Tasks: `mmlu`, `mmlu_pro`, `gpqa_main_zeroshot`, `gpqa_diamond_zeroshot`
+- Tasks: `mmlu`, `gpqa_main_zeroshot`, `gpqa_diamond_zeroshot`
   (exact installed-harness names; guarded by a test that resolves them via
-  `TaskManager.match_tasks`)
-- Zero-shot: `num_fewshot=0` explicitly overrides each task's own default
-  (notably `mmlu_pro`, whose yaml defaults to 5-shot CoT)
+  `TaskManager.match_tasks`; all are loglikelihood tasks)
+- Zero-shot: `num_fewshot=0`
 - Seeds: `1234` for random/numpy/torch/fewshot
 - Limit: `500` — **applies per subtask**, so group `mmlu` (~57 subtasks) runs
   nearly the full set; budget accordingly or pilot with `--limit 100`
 - Batch/device: `auto:2` on `cuda:0`
 - Quantization: int8, enforced inside `models/jetmoe.py` loading (recorded in
   the artifact as `dtype: "int8"`)
-- Generation: greedy-only (`do_sample=False`); sampling raises
-  `NotImplementedError`
 
 ## Run flow and artifact
 
@@ -120,8 +117,6 @@ Operational notes:
 
 - Pilot at low `--limit` first; full grid = base + `{l,b,m} × R∈{2,3,4}` = 10
   variants.
-- `mmlu_pro` is generative CoT (`max_gen_toks=2048`) and our decoding loop has
-  no KV cache — expect it to dominate wall time uniformly across variants.
 - GPQA needs the gated HF dataset login even though tasks are zero-shot.
 - The parity gate must print `ok=True` before burning GPU quota (see
   `docs/KAGGLE_RUNBOOK.md`).
