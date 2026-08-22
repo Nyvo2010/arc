@@ -1,3 +1,0 @@
-model:
-  path: models/jetmoe-8b
-  block_size: 4

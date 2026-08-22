@@ -16,6 +16,7 @@ class JetMoeAdapter(ARCAdapter):
         self.head = hf_model.lm_head
         self.cfg = hf_model.config
         self.block_size = max(1, block_size)
+        self.hidden_dim = int(getattr(self.cfg, "hidden_size", 768))
 
     def embed(self, input_ids: Tensor) -> Tensor:
         return self.net.embed_tokens(input_ids)

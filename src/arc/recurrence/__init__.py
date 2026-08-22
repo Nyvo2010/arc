@@ -1,10 +1,8 @@
-from arc.recurrence.base import (
-    BaseLM,
-    BlockRecurrenceLM,
-    LayerRecurrenceLM,
-    ModelRecurrenceLM,
-    RecurrentLM,
-    build_recurrent_model,
-)
+from __future__ import annotations
 
-__all__ = ["BaseLM", "RecurrentLM", "ModelRecurrenceLM", "BlockRecurrenceLM", "LayerRecurrenceLM", "build_recurrent_model"]
+from .builder import build_model
+from .base import BaseLM, ModelRecurrenceLM, BlockRecurrenceLM, LayerRecurrenceLM
+from .adaptive import ModelAdaptiveRecurrenceLM, BlockAdaptiveRecurrenceLM, LayerAdaptiveRecurrenceLM
+from .controller import RecurrenceController, ThresholdController, ControllerFeatures
+from .state import RecurrenceState
+from .halt_head import ModelHaltHead, BlockHaltHead, LayerHaltHead
