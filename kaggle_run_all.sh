@@ -8,6 +8,14 @@ MODEL_PATH=${1:-/kaggle/working/models/jetmoe-8b}
 OUTPUT_DIR=${2:-/kaggle/working/arc_results}
 DEVICE=${3:-${KAGGLE_DEVICE:-cuda}}
 
+# Kaggle compatibility preflight
+echo "[INFO] Python: $(python3 --version)"
+python3 - <<'PY'
+import sys
+print(f"[INFO] Python executable: {sys.executable}")
+print(f"[INFO] Python version: {sys.version.split()[0]}")
+PY
+
 # Device validation - prefer GPU
 if python3 -c 'import torch; print(torch.cuda.is_available())' 2>/dev/null | grep -q True; then
   DEVICE="cuda"
@@ -34,6 +42,14 @@ pip install -q -e .
 pip install -q -r requirements-kaggle.txt
 
 echo "[1/4] Installing complete"
+
+# Verify dependencies
+python3 - <<'PY'
+import torch, transformers, accelerate, safetensors, psutil
+print(f"[INFO] torch {torch.__version__}, cuda available: {torch.cuda.is_available()}")
+print(f"[INFO] transformers {transformers.__version__}")
+print(f"[INFO] accelerate {accelerate.__version__}")
+PY
 
 # Quick parity smoke on tiny stub to validate adapter contract
 echo "[1.5/4] Parity smoke"

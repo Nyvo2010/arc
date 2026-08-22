@@ -13,6 +13,15 @@ if [[ ! -d "$MODEL_PATH" ]]; then
   exit 1
 fi
 
+# Check Python version >=3.11
+python3 - <<'PY'
+import sys
+if sys.version_info < (3, 11):
+    print("[preflight] ERROR: Python >=3.11 required")
+    sys.exit(1)
+print(f"[preflight] Python version {sys.version.split()[0]} ok")
+PY
+
 for f in config.json model.safetensors.index.json; do
   if [[ ! -f "$MODEL_PATH/$f" ]]; then
     echo "[preflight] ERROR: Missing $f in model dir" >&2
