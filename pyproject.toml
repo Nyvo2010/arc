@@ -1,5 +1,5 @@
 [project]
-name = "arc-adaptive-recurrence-computing"
+name = "arc"
 version = "0.1.0"
 description = "Adaptive Recurrence Computing for pretrained MoE Transformers"
 requires-python = ">=3.11"
