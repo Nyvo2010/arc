@@ -119,13 +119,23 @@ with summary.open("w", newline="") as f:
 print("Wrote", summary)
 PY
 
-# LM Eval free tasks
-echo "[4/5] LM Eval benchmarks"
+# LM Eval: per-R accuracy on trimmed benchmarks (limit keeps it in one session).
+# Matrix (stage 2) already covers tokens/FLOPs/RAM per R; this adds accuracy.
+echo "[4/5] LM Eval benchmarks (trimmed, limit=${LM_EVAL_LIMIT:-200}/task)"
 TASKS="arc_challenge,mmlu,gsm8k"
 mkdir -p "$OUTPUT_DIR/lm_eval"
-for V in base model_fixed block_fixed layer_fixed model_adaptive block_adaptive layer_adaptive; do
-  echo "  LM Eval $V"
-  timeout "$PIPELINE_TIMEOUT" python3 -m arc.benchmarks.lm_eval_bridge --source "$MODEL_PATH" --variant "$V" --tasks "$TASKS" --device "$DEVICE" --max_loops 4 --seed 0 > "$OUTPUT_DIR/lm_eval/${V}.json" 2>&1 || echo "WARN: LM Eval $V failed/timeout, continuing"
+EVAL_CONFIGS=(
+  "base|"
+  "model_fixed|--recurrence 2" "model_fixed|--recurrence 3" "model_fixed|--recurrence 4"
+  "block_fixed|--recurrence 2" "block_fixed|--recurrence 3" "block_fixed|--recurrence 4"
+  "layer_fixed|--recurrence 2" "layer_fixed|--recurrence 3" "layer_fixed|--recurrence 4"
+  "model_adaptive|" "block_adaptive|" "layer_adaptive|"
+)
+for ENTRY in "${EVAL_CONFIGS[@]}"; do
+  V="${ENTRY%%|*}"; EXTRA="${ENTRY#*|}"
+  LABEL="$V${EXTRA//--recurrence /_R}"
+  echo "  LM Eval $LABEL"
+  timeout "$PIPELINE_TIMEOUT" python3 -m arc.benchmarks.lm_eval_bridge --source "$MODEL_PATH" --variant "$V" $EXTRA --tasks "$TASKS" --device "$DEVICE" --max_loops 4 --seed 0 --limit "${LM_EVAL_LIMIT:-200}" > "$OUTPUT_DIR/lm_eval/${LABEL}.json" 2>&1 || echo "WARN: LM Eval $LABEL failed/timeout, continuing"
 done
 
 echo "[5/5] Done ==="

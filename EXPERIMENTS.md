@@ -28,7 +28,7 @@ Free community benchmarks via LM-Eval (Kaggle default set):
 - mmlu zero-shot (loglikelihood)
 - gsm8k (generative)
 
-hellaswag and arc_easy were dropped for runtime; see KAGGLE_RUN.md.
+hellaswag and arc_easy were dropped for runtime; see TEST_RUN_DESCRIPTION.md.
 
 ## Metrics recorded
 - avg_time_s, tokens_per_s

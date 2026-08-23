@@ -32,13 +32,15 @@ class ARCLoglikelihoodWrapper(LM):
       - loglikelihood(toks, choices)
     The wrapper builds an ARC model per call and caches the engine.
     """
-    def __init__(self, source: str, variant: str, device: str = "cpu", max_loops: int = 4, seed: int = 0, **kwargs):
+    def __init__(self, source: str, variant: str, device: str = "cpu", max_loops: int = 4, seed: int = 0,
+                 recurrence: int = 1, **kwargs):
         super().__init__()
         self.engine = InferenceEngine(
             source=source,
             variant=variant,
             device_map="auto" if device != "cpu" else None,
             max_loops=max_loops,
+            recurrence=recurrence,
             seed=seed,
         )
         from transformers import AutoTokenizer
@@ -125,6 +127,10 @@ def main():
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--max_loops", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--recurrence", type=int, default=None,
+                        help="Fixed recurrence R for *_fixed variants (e.g. 2, 3, 4)")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="Max samples per task; use to trim benchmark cost")
     args = parser.parse_args()
 
     # Lazy import to avoid hard dependency when not running eval
@@ -139,6 +145,7 @@ def main():
         device=args.device,
         max_loops=args.max_loops,
         seed=args.seed,
+        recurrence=args.recurrence or 1,
     )
 
     results = evaluator.simple_evaluate(
@@ -146,6 +153,7 @@ def main():
         tasks=args.tasks.split(","),
         device=args.device,
         batch_size=1,
+        limit=args.limit,
         random_seed=args.seed,
         numpy_random_seed=args.seed,
         torch_random_seed=args.seed,

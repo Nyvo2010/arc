@@ -89,7 +89,7 @@ Features:
 
 ## Free community benchmarks
 
-`arc_challenge`, `mmlu`, `gsm8k` via `lm-evaluation-harness`. See `KAGGLE_RUN.md`
+`arc_challenge`, `mmlu`, `gsm8k` via `lm-evaluation-harness`. See `TEST_RUN_DESCRIPTION.md`
 for exactly what a full Kaggle run executes, expected runtimes, and limits.
 
 Run via bridge:

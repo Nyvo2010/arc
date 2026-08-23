@@ -22,7 +22,7 @@ starting a full run.
 | 1.5 | Parity smoke | Tiny random JetMoE forward-parity test (decomposed vs native HF forward) | <1 min |
 | 2 | Real-model parity + matrix | Loads JetMoE-8B once, runs `verify_parity` on real weights (must pass), then runs all 13 configs below | ~20–50 min |
 | 3 | Summary | Copies matrix CSV to `summary.csv` | seconds |
-| 4 | LM-Eval | Runs the bridge for each of the 7 variants on `arc_challenge,mmlu,gsm8k` | see runtime section |
+| 4 | LM-Eval | Runs the bridge for all 13 configs (fixed variants per R) on trimmed `arc_challenge,mmlu,gsm8k` | see runtime section |
 
 Each stage is capped at `PIPELINE_TIMEOUT` (default 1800s = 30 min). Matrix results
 flush to CSV incrementally after every config, so partial results survive timeouts.
@@ -51,26 +51,39 @@ Measured workload: 32 prompts × seq_len 128, batch size 1, seed 0.
 
 ## LM-Eval benchmarks (real benchmarks)
 
-Run for the **7 variants** (not all 13 — fixed variants collapse to one eval per scale;
-different R values share a variant entry). Tasks:
+Run for **all 13 configs** — each fixed variant is evaluated separately per R value
+so you can compare which loop counts perform better. Trimmed with `--limit`
+(default 200 samples/task, override via `LM_EVAL_LIMIT` env var):
 
-| Task | Type | Docs | Requests/variant (approx) |
-|------|------|------|---------------------------|
-| arc_challenge | loglikelihood (multiple choice) | ~1.2k | ~5k |
-| mmlu | loglikelihood, zero-shot | ~14k | ~14k |
-| gsm8k | **generative** (greedy) | ~1.3k | ~1.3k gens |
+| Eval | arc_challenge (200) | mmlu (200) | gsm8k (200 gens) |
+|------|---------------------|------------|-------------------|
+| base | ✓ | ✓ | ✓ |
+| model_fixed_R2 / _R3 / _R4 | ✓ | ✓ | ✓ |
+| block_fixed_R2 / _R3 / _R4 | ✓ | ✓ | ✓ |
+| layer_fixed_R2 / _R3 / _R4 | ✓ | ✓ | ✓ |
+| model_adaptive / block_adaptive / layer_adaptive | ✓ | ✓ | ✓ |
+
+13 evals × ~600 trimmed requests ≈ **1.5–3 GPU-hours total**. Fits one session.
+
+**Cost side per R:** tokens/sec, FLOPs, RAM, latency for every R value already come
+from the matrix stage (`matrix_results.csv`) — combine those rows with these eval
+JSONs to get the accuracy-vs-compute tradeoff per loop count.
 
 hellaswag (~40k requests) and arc_easy (~9.5k requests) were **removed for runtime**.
 Add them back in `kaggle_run_all.sh` (`TASKS=`) if you accept multi-session runs.
 
 ## Runtime reality check (T4 x2 / P100, 8-bit)
 
-- Full pipeline minus LM-Eval: **~45–75 min** in one session. Comfortable.
-- LM-Eval untrimmed (current 3 tasks × 7 variants): **~15–28 GPU-hours**.
+- Full pipeline including trimmed LM-Eval: **~2.5–4 hours** in one session. Fits.
+- LM-Eval untrimmed (no `--limit`, current 3 tasks × 13 configs): **~30–55 GPU-hours**.
   This does NOT fit one Kaggle session (max 9–12h GPU).
-  The runner treats per-variant LM-Eval failures/timeouts as warnings and continues,
+  The runner treats per-config LM-Eval failures/timeouts as warnings and continues,
   so you still get matrix results plus whatever eval output finished.
-- To fit everything in one session, trim LM-Eval (fewer tasks, or add sample limits).
+
+### Score caveats at limit=200
+- A 200-sample slice has wide error bars (±5–10 pts). Good enough to RANK configs
+  against each other on the same slice; NOT comparable to published leaderboard numbers.
+- gsm8k is generative: 200 greedy generations per config, still the slowest task per sample.
 
 ## Kaggle constraints & disclaimers
 
