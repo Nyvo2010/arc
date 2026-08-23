@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
 import argparse
 import csv
 import json
 import time
-from pathlib import Path
 from typing import Any, Dict, List
 
 import torch

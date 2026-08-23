@@ -57,3 +57,8 @@ session timeouts.
 ## Changelog
 2026-08-22: Pinned requirements for Kaggle reproducibility, added fail-fast timeouts and no-progress guards
 2026-08-23: Added benchmark_matrix.py unified 13-config grid; kaggle_run_all.sh no longer reinstalls torch, defaults to /kaggle/input dataset path
+2026-08-23: Kaggle reliability pass - configs/kaggle.yaml gains model.block_size (validated by arc.common.config);
+  matrix loads the checkpoint once, runs real-model parity itself, and honors accelerate device maps;
+  preflight validates shards from model.safetensors.index.json and imports arc from src/;
+  runner checks existing deps instead of re-resolving pip; lm_eval_bridge subclasses lm_eval.api.model.LM
+  (simple_evaluate) with tokenizer-based loglikelihood; 8-bit GPU load failure is fatal instead of OOM CPU fallback

@@ -9,14 +9,47 @@ internet in notebook settings, then use **Save & Run All (Commit)** for unattend
 execution (GPU sessions up to 9-12h; ~30 GPU hrs/week free quota).
 
 ```bash
-./kaggle_run_all.sh /kaggle/input/jetmoe-8b /kaggle/working/arc_results
+./kaggle_run_all.sh /kaggle/working/jetmoe-8b /kaggle/working/arc_results cuda
 ```
 
-Runs preflight checks, parity smoke, the unified 13-config experiment matrix
+Runs preflight checks, real-model parity, the unified 13-config experiment matrix
 (base + fixed variants at recurrence {2,3,4} + adaptive variants at max_loops=4,
 with full metrics: time, tokens/s, FLOPs, executions, recurrence-per-unit, RAM),
 and LM-Eval for all 7 variants with logs and a summary CSV.
+The checkpoint is loaded once and reused across all matrix configurations.
 Results flush incrementally so partial results survive session timeouts.
+
+### Kaggle notebook cells
+
+Use `%pip` in the install cell so the package is installed into the active
+notebook kernel. Do not run a separate 8B parity cell; the runner performs the
+real-model parity gate immediately before the matrix and reuses that model.
+
+```python
+%pip install -q -e .[lmeval]
+```
+
+```python
+from pathlib import Path
+from huggingface_hub import login, snapshot_download
+
+token_file = Path("/kaggle/input/hf-secret/hf_token.txt")
+if token_file.exists():
+    login(token_file.read_text().strip())
+
+model_dir = "/kaggle/working/jetmoe-8b"
+snapshot_download(repo_id="jetmoe/jetmoe-8b", local_dir=model_dir)
+print("Model downloaded to", model_dir)
+```
+
+```bash
+!bash /kaggle/working/arc/kaggle_run_all.sh /kaggle/working/jetmoe-8b /kaggle/working/arc_results cuda
+```
+
+If the install cell changes `torch`, `transformers`, or CUDA-related packages,
+restart the Kaggle session before running the download and runner cells. The
+runner intentionally checks the existing environment and does not reinstall
+those packages.
 
 ## Variants
 

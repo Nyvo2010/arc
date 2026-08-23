@@ -150,7 +150,13 @@ def build_tiny_jetmoe(seed: int = 0, device: str | None = None, attn_implementat
 
 
 def load_jetmoe(path: str, device_map: str | None = "auto"):
-    """Load JetMoE-8B in 8-bit if GPU available, else CPU float32 fallback."""
+    """Load JetMoE-8B with the Kaggle-safe GPU path when CUDA is available.
+
+    The 8B checkpoint is not a practical CPU fallback for Kaggle. If CUDA is
+    available, a failed quantized load is therefore surfaced immediately with
+    an actionable error instead of falling through to an OOM-prone float32
+    load.
+    """
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
     import torch
 
@@ -166,7 +172,10 @@ def load_jetmoe(path: str, device_map: str | None = "auto"):
             model.eval()
             return model
         except Exception as e:
-            print(f"[load_jetmoe] 8-bit GPU load failed: {e}, falling back to CPU")
+            raise RuntimeError(
+                "Could not load JetMoE-8B in 8-bit on CUDA. Install a compatible "
+                "bitsandbytes build or use a Kaggle GPU runtime."
+            ) from e
 
     # CPU fallback: no quantization
     print("[load_jetmoe] Loading on CPU float32 fallback")

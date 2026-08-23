@@ -29,6 +29,22 @@ for f in config.json model.safetensors.index.json; do
   fi
 done
 
+python3 - "$MODEL_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+model_path = Path(sys.argv[1])
+index = json.loads((model_path / "model.safetensors.index.json").read_text())
+shards = sorted(set(index.get("weight_map", {}).values()))
+if not shards:
+    raise SystemExit("[preflight] ERROR: model index has no weight_map entries")
+missing = [name for name in shards if not (model_path / name).is_file()]
+if missing:
+    raise SystemExit("[preflight] ERROR: Missing model shards: " + ", ".join(missing))
+print(f"[preflight] {len(shards)} model shards present")
+PY
+
 if command -v python3 >/dev/null; then
   echo "[preflight] python3 found"
 else
@@ -40,6 +56,7 @@ fi
 python3 - <<'PY'
 import sys
 sys.path.insert(0, '.')
+sys.path.insert(0, 'src')
 try:
     import arc.models.registry as r
     assert 'base' in r.MODEL_VARIANTS

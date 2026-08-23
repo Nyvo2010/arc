@@ -1,6 +1,7 @@
 model:
   name: jetmoe-8b
   path: /kaggle/working/jetmoe-8b
+  block_size: 4
   device_map: auto
 
 arc:

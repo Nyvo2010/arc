@@ -4,14 +4,14 @@ trap 'echo "[ERROR] Failed at line $LINENO" >&2; exit 1' ERR
 
 # ARC Kaggle Auto-Run with fail-fast and no-progress guards
 # Usage: ./kaggle_run_all.sh [MODEL_PATH] [OUTPUT_DIR] [DEVICE]
-# MODEL_PATH: usually a read-only Kaggle dataset mount, e.g. /kaggle/input/jetmoe-8b
+# MODEL_PATH: usually a Kaggle working-directory download or read-only dataset mount
 MODEL_PATH=${1:-$(ls -d /kaggle/input/*/ 2>/dev/null | head -1 || echo /kaggle/input/jetmoe-8b)}
 OUTPUT_DIR=${2:-/kaggle/working/arc_results}
 DEVICE=${3:-${KAGGLE_DEVICE:-cuda}}
 
 # Kaggle limits: interactive idle ~20 min, batch max 12h CPU/GPU, 9h TPU
 # We enforce early exit on errors and stalls to save compute
-export PIPELINE_TIMEOUT=1800   # 30 min per stage max
+export PIPELINE_TIMEOUT=${PIPELINE_TIMEOUT:-1800}   # 30 min per stage max
 
 # --- Preflight ---
 echo "[INFO] Python: $(python3 --version)"
@@ -53,11 +53,18 @@ echo "Log: $LOG"
 
 bash scripts/preflight_check.sh "$MODEL_PATH" || { echo "Preflight failed"; exit 1; }
 
-pip install -q -e .
-# Kaggle images ship a CUDA-matched torch; never reinstall it.
-python3 -c 'import torch' 2>/dev/null || pip install -q torch==2.4.0
-grep -vE '^torch==' requirements-kaggle.txt | pip install -q -r /dev/stdin
-echo "[1/4] Installing complete"
+# The notebook installs the package before downloading the model. Do not
+# reinstall Kaggle's CUDA stack here; a second pip resolution can replace
+# torch/transformers and invalidate an already-loaded runtime.
+python3 - <<'PY'
+import importlib
+required = ("torch", "transformers", "accelerate", "safetensors", "yaml", "psutil")
+missing = [name for name in required if importlib.util.find_spec(name) is None]
+if missing:
+    raise SystemExit("Missing runtime dependencies: " + ", ".join(missing) + ". Re-run the notebook install cell.")
+print("[INFO] Runtime dependencies already installed")
+PY
+echo "[1/4] Installation check complete"
 
 python3 - <<'PY'
 import torch, transformers, accelerate, safetensors, psutil
@@ -92,7 +99,7 @@ run_stage() {
 
 # Unified experiment matrix: 7 variants, fixed ones at R in {2,3,4}, all metrics
 echo "[2/5] Experiment matrix (7 variants, full metrics)"
-timeout "$PIPELINE_TIMEOUT" python scripts/benchmark_matrix.py --source "$MODEL_PATH" --device "$DEVICE" --outdir "$OUTPUT_DIR/matrix" || { echo "Matrix benchmark failed/timeout"; exit 1; }
+timeout "$PIPELINE_TIMEOUT" python3 scripts/benchmark_matrix.py --source "$MODEL_PATH" --device "$DEVICE" --outdir "$OUTPUT_DIR/matrix" --block_size 4 || { echo "Matrix benchmark failed/timeout"; exit 1; }
 [[ -f "$OUTPUT_DIR/matrix/matrix_results.csv" ]] || { echo "No matrix output"; exit 1; }
 
 # Aggregate summary (numbers, not just names)
@@ -118,7 +125,7 @@ TASKS="hellaswag,arc_easy,arc_challenge,gsm8k,mmlu"
 mkdir -p "$OUTPUT_DIR/lm_eval"
 for V in base model_fixed block_fixed layer_fixed model_adaptive block_adaptive layer_adaptive; do
   echo "  LM Eval $V"
-  timeout "$PIPELINE_TIMEOUT" python -m arc.benchmarks.lm_eval_bridge --source "$MODEL_PATH" --variant "$V" --tasks "$TASKS" --device "$DEVICE" --max_loops 4 --seed 0 > "$OUTPUT_DIR/lm_eval/${V}.json" 2>&1 || echo "WARN: LM Eval $V failed/timeout, continuing"
+  timeout "$PIPELINE_TIMEOUT" python3 -m arc.benchmarks.lm_eval_bridge --source "$MODEL_PATH" --variant "$V" --tasks "$TASKS" --device "$DEVICE" --max_loops 4 --seed 0 > "$OUTPUT_DIR/lm_eval/${V}.json" 2>&1 || echo "WARN: LM Eval $V failed/timeout, continuing"
 done
 
 echo "[5/5] Done ==="

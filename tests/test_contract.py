@@ -22,5 +22,11 @@ def test_adapter_contract():
     print("contract ok")
 
 
+def test_kaggle_config_has_block_size():
+    from arc.common.config import load_config
+    config = load_config("configs/kaggle.yaml")
+    assert config["model"]["block_size"] == 4
+
+
 if __name__ == "__main__":
     test_adapter_contract()
