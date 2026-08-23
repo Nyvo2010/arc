@@ -23,12 +23,12 @@ Seven variants defined in `src/arc/models/registry.MODEL_VARIANTS`:
 - **parity gate**: `JetMoeAdapter.verify_parity` must pass before experiments
 
 ## Benchmarks
-Free community benchmarks via LM-Eval loglikelihood-only:
-- hellaswag
-- arc_easy
-- arc_challenge
-- gsm8k
-- mmlu zero-shot
+Free community benchmarks via LM-Eval (Kaggle default set):
+- arc_challenge (loglikelihood)
+- mmlu zero-shot (loglikelihood)
+- gsm8k (generative)
+
+hellaswag and arc_easy were dropped for runtime; see KAGGLE_RUN.md.
 
 ## Metrics recorded
 - avg_time_s, tokens_per_s

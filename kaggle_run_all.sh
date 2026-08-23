@@ -121,7 +121,7 @@ PY
 
 # LM Eval free tasks
 echo "[4/5] LM Eval benchmarks"
-TASKS="hellaswag,arc_easy,arc_challenge,gsm8k,mmlu"
+TASKS="arc_challenge,mmlu,gsm8k"
 mkdir -p "$OUTPUT_DIR/lm_eval"
 for V in base model_fixed block_fixed layer_fixed model_adaptive block_adaptive layer_adaptive; do
   echo "  LM Eval $V"

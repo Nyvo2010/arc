@@ -89,12 +89,13 @@ Features:
 
 ## Free community benchmarks
 
-`hellaswag`, `arc_easy`, `arc_challenge`, `gsm8k`, `mmlu` — loglikelihood-only via `lm-evaluation-harness`.
+`arc_challenge`, `mmlu`, `gsm8k` via `lm-evaluation-harness`. See `KAGGLE_RUN.md`
+for exactly what a full Kaggle run executes, expected runtimes, and limits.
 
 Run via bridge:
 ```bash
 pip install "lm-eval[hf]"
-python -m arc.benchmarks.lm_eval_bridge --source /path/to/jetmoe-8b --variant model_adaptive --tasks hellaswag,arc_easy --device cuda
+python -m arc.benchmarks.lm_eval_bridge --source /path/to/jetmoe-8b --variant model_adaptive --tasks arc_challenge,mmlu,gsm8k --device cuda
 ```
 
 ## Quick start

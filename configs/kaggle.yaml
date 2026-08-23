@@ -18,5 +18,5 @@ arc:
     - layer_adaptive
 
 lm_eval:
-  tasks: [hellaswag, arc_easy, arc_challenge, gsm8k, mmlu]
+  tasks: [arc_challenge, mmlu, gsm8k]
   loglikelihood_only: true
