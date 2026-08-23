@@ -4,6 +4,10 @@ This document describes **exactly** what `kaggle_run_all.sh` runs, in order,
 what is measured, and what the limits and caveats are. Read this before
 starting a full run.
 
+> **Status: pilot-study pipeline.** This run validates the harness and produces
+> directional signals only. See "Scope of this run" below for what the next
+> full evaluation must add before any research conclusions are drawn.
+
 ## Model
 
 - **JetMoE-8B** (`jetmoe/jetmoe-8b`), MoE with ~8B total / ~2B active params per token.
@@ -95,6 +99,46 @@ Add them back in `kaggle_run_all.sh` (`TASKS=`) if you accept multi-session runs
 - A 200-sample slice has wide error bars (±5–10 pts). Good enough to RANK configs
   against each other on the same slice; NOT comparable to published leaderboard numbers.
 - gsm8k is generative: 200 greedy generations per config, still the slowest task per sample.
+- **mmlu does not complete at limit=200**: `--limit` applies PER SUBTASK and mmlu is
+  57 subtasks → ~45k requests, which always exceeds the 30-min stage cap. Each eval
+  therefore yields arc_challenge only; mmlu needs a per-task limit (~25/subtask) or
+  subtask selection to fit.
+
+## Scope of this run: PILOT STUDY — not publication-grade
+
+This pipeline validates that the harness works end-to-end (parity gates pass,
+metrics are collected, benchmarks score) and gives **directional signals only**.
+It is general experimentation, not evidence for research claims. Do not cite
+these numbers as findings.
+
+Known limitations that block academic claims:
+1. **Single benchmark** (arc_challenge, 200 samples). One dataset cannot support
+   a quality-per-FLOP claim.
+2. **Underpowered statistics.** ±3–7pt stderr at n=200; only gaps >~7pts are
+   distinguishable (e.g., base vs model_fixed R=2).
+3. **FLOPs are a dense analytic upper bound**, not measurement. JetMoE routes
+   top-2-of-8 experts per token, so active compute is roughly 1/4 of reported
+   values and is input-dependent (routing not yet measured).
+
+## Required for the NEXT full evaluation (research-grade)
+
+Before drawing conclusions from all models/configs, the next run must add:
+
+1. **Full datasets or large samples** — arc_challenge full test set (1172 docs)
+   at minimum; report mean ± CI over >=3 seeds per config with paired
+   significance tests between configs.
+2. **Multiple benchmarks** — at least 3 diverse tasks (e.g., arc_challenge,
+   hellaswag subset, mmlu subset with per-task limits, plus a commonsense task
+   like PIQA/WinoGrande).
+3. **MoE-aware compute accounting** — count actual expert activations per forward
+   (router selections are observable) and report BOTH dense-bound and
+   active-FLOPs; wall-clock time and memory stay as measured secondary metrics.
+4. **Per-task sample limits** in the bridge (`--limit` currently applies per
+   subtask, which silently explodes grouped tasks like mmlu) so every task fits
+   its stage budget deterministically.
+5. **Tuned or at least characterized adaptive controllers** — record actual
+   halting behavior distribution; untuned thresholds may make adaptive variants
+   degenerate to max_loops every time, which must be visible in the results.
 
 ## Kaggle constraints & disclaimers
 

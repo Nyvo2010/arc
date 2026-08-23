@@ -38,6 +38,8 @@ hellaswag and arc_easy were dropped for runtime; see TEST_RUN_DESCRIPTION.md.
 - avg recurrence per unit
 
 ## Experiment notes
+- **Status: pilot study** — pipeline validation + directional signals only; see
+  TEST_RUN_DESCRIPTION.md "Required for the NEXT full evaluation" before making claims
 - FLOP estimator is upper bound, not sparsity-aware
 - HALT heads use entropy, entropy_delta, JS divergence, top-1 stability, hidden cosine change, recurrence count
 - Device: prefer CUDA, fallback CPU
