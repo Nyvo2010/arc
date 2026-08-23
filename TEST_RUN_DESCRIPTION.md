@@ -122,7 +122,8 @@ Known limitations that block academic claims:
 
 ## Required for the NEXT full evaluation (research-grade)
 
-Before drawing conclusions from all models/configs, the next run must add:
+The full publication-grade design lives in **RESEARCH_PLAN.md**. Summary of
+what must change before drawing conclusions from all models/configs:
 
 1. **Full datasets or large samples** — arc_challenge full test set (1172 docs)
    at minimum; report mean ± CI over >=3 seeds per config with paired
