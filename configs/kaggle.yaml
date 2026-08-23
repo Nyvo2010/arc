@@ -1,0 +1,21 @@
+model:
+  name: jetmoe-8b
+  path: /kaggle/working/jetmoe-8b
+  device_map: auto
+
+arc:
+  seed: 0
+  max_loops: 4
+  recurrence_values: [2, 3, 4]
+  variants:
+    - base
+    - model_fixed
+    - block_fixed
+    - layer_fixed
+    - model_adaptive
+    - block_adaptive
+    - layer_adaptive
+
+lm_eval:
+  tasks: [hellaswag, arc_easy, arc_challenge, gsm8k, mmlu]
+  loglikelihood_only: true
