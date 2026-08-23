@@ -55,15 +55,26 @@ Run for **all 13 configs** — each fixed variant is evaluated separately per R 
 so you can compare which loop counts perform better. Trimmed with `--limit`
 (default 200 samples/task, override via `LM_EVAL_LIMIT` env var):
 
-| Eval | arc_challenge (200) | mmlu (200) | gsm8k (200 gens) |
-|------|---------------------|------------|-------------------|
-| base | ✓ | ✓ | ✓ |
-| model_fixed_R2 / _R3 / _R4 | ✓ | ✓ | ✓ |
-| block_fixed_R2 / _R3 / _R4 | ✓ | ✓ | ✓ |
-| layer_fixed_R2 / _R3 / _R4 | ✓ | ✓ | ✓ |
-| model_adaptive / block_adaptive / layer_adaptive | ✓ | ✓ | ✓ |
+| Eval | arc_challenge (200) | mmlu (200) |
+|------|---------------------|------------|
+| base | ✓ | ✓ |
+| model_fixed_R2 / _R3 / _R4 | ✓ | ✓ |
+| block_fixed_R2 / _R3 / _R4 | ✓ | ✓ |
+| layer_fixed_R2 / _R3 / _R4 | ✓ | ✓ |
+| model_adaptive / block_adaptive / layer_adaptive | ✓ | ✓ |
 
-13 evals × ~600 trimmed requests ≈ **1.5–3 GPU-hours total**. Fits one session.
+12 evals × ~400 trimmed requests ≈ **40–90 min total**. Fits one session easily.
+
+**gsm8k is opt-in, off by default.** It is generative through the recurrence
+wrapper (no KV cache), so 200 greedy generations cannot finish inside the
+30-min stage cap — the first full run timed out on it and produced nothing.
+Enable with `LM_EVAL_TASKS=arc_challenge,mmlu,gsm8k` if you accept that; scores
+now save incrementally per task, so completed arc_challenge/mmlu results
+survive a gsm8k timeout within an eval.
+
+**Results are saved per task**: each eval writes its JSON after every finished
+task (`--output`), so a timeout loses at most the in-progress task, not the
+whole eval.
 
 **Cost side per R:** tokens/sec, FLOPs, RAM, latency for every R value already come
 from the matrix stage (`matrix_results.csv`) — combine those rows with these eval

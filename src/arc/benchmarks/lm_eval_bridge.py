@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 sys.path.insert(0, "src")
 
@@ -103,18 +104,34 @@ class ARCLoglikelihoodWrapper(LM):
         )]
 
     def generate_until(self, requests):
+        # ARC-faithful greedy decoding through the recurrent wrapper.
+        # NOTE: no KV cache exists for recurrence models, so cost scales with
+        # output length; gsm8k-style generation is expensive by construction.
         results = []
         for request in requests:
             prompt, gen_kwargs = request.args
             ids = self.tokenizer(prompt, return_tensors="pt")["input_ids"].to(self._device)
             max_new = int(gen_kwargs.get("max_gen_toks", 32))
-            stop = gen_kwargs.get("until", [])
+            stop = list(gen_kwargs.get("until", []))
+            generated: list[int] = []
+            finished = False
             for _ in range(max_new):
                 logits = self.engine(ids).logits[:, -1, :]
-                ids = torch.cat([ids, logits.argmax(dim=-1, keepdim=True)], dim=1)
-                text = self.tokenizer.decode(ids[0, -max_new:], skip_special_tokens=True)
-                if any(text.endswith(marker) for marker in stop):
+                next_id = int(logits.argmax(dim=-1).item())
+                eos = getattr(self.engine.adapter.hf_model.config, "eos_token_id", None)
+                if next_id == eos:
                     break
+                generated.append(next_id)
+                ids = torch.cat([ids, torch.tensor([[next_id]], device=self._device)], dim=1)
+                text = self.tokenizer.decode(generated, skip_special_tokens=True)
+                if any(marker and marker in text for marker in stop):
+                    finished = True
+                    break
+            text = self.tokenizer.decode(generated, skip_special_tokens=True)
+            if not finished:
+                for marker in stop:
+                    if marker and marker in text:
+                        text = text[: text.index(marker)]
             results.append(text)
         return results
 
@@ -131,6 +148,8 @@ def main():
                         help="Fixed recurrence R for *_fixed variants (e.g. 2, 3, 4)")
     parser.add_argument("--limit", type=int, default=None,
                         help="Max samples per task; use to trim benchmark cost")
+    parser.add_argument("--output", default=None,
+                        help="Path to write results JSON incrementally (per task)")
     args = parser.parse_args()
 
     # Lazy import to avoid hard dependency when not running eval
@@ -148,17 +167,37 @@ def main():
         recurrence=args.recurrence or 1,
     )
 
-    results = evaluator.simple_evaluate(
-        model=model,
-        tasks=args.tasks.split(","),
-        device=args.device,
-        batch_size=1,
-        limit=args.limit,
-        random_seed=args.seed,
-        numpy_random_seed=args.seed,
-        torch_random_seed=args.seed,
-    )
-    print(results)
+    tasks = args.tasks.split(",")
+    merged: dict = {"variant": args.variant, "recurrence": args.recurrence, "results": {}, "configs": {}}
+    if args.output:
+        from pathlib import Path
+        Path(args.output).write_text(json.dumps(merged, indent=2))
+
+    # Evaluate one task at a time so completed scores survive a later
+    # timeout; the JSON on disk is updated after every task.
+    for i, task in enumerate(tasks, 1):
+        print(f"[bridge] task {i}/{len(tasks)}: {task}", flush=True)
+        results = evaluator.simple_evaluate(
+            model=model,
+            tasks=[task],
+            device=args.device,
+            batch_size=1,
+            limit=args.limit,
+            random_seed=args.seed,
+            numpy_random_seed=args.seed,
+            torch_random_seed=args.seed,
+        )
+        if results is None:
+            continue
+        merged["results"].update(results.get("results", {}))
+        merged["configs"].update(results.get("configs", {}))
+        if args.output:
+            with open(args.output, "w") as f:
+                json.dump(merged, f, indent=2)
+        print(f"[bridge] {args.variant} {task}: "
+              f"{merged['results'].get(task)}", flush=True)
+
+    print(json.dumps(merged, indent=2))
 
 
 if __name__ == "__main__":

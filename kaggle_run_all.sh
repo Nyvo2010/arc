@@ -121,8 +121,12 @@ PY
 
 # LM Eval: per-R accuracy on trimmed benchmarks (limit keeps it in one session).
 # Matrix (stage 2) already covers tokens/FLOPs/RAM per R; this adds accuracy.
+# Default tasks are loglikelihood-only. gsm8k is generative through the
+# recurrence wrapper (no KV cache) and cannot finish inside PIPELINE_TIMEOUT;
+# enable it via LM_EVAL_TASKS if you accept timeouts on that task only —
+# scores now save incrementally per task, so completed tasks survive anyway.
 echo "[4/5] LM Eval benchmarks (trimmed, limit=${LM_EVAL_LIMIT:-200}/task)"
-TASKS="arc_challenge,mmlu,gsm8k"
+TASKS="${LM_EVAL_TASKS:-arc_challenge,mmlu}"
 mkdir -p "$OUTPUT_DIR/lm_eval"
 EVAL_CONFIGS=(
   "base|"
@@ -135,7 +139,7 @@ for ENTRY in "${EVAL_CONFIGS[@]}"; do
   V="${ENTRY%%|*}"; EXTRA="${ENTRY#*|}"
   LABEL="$V${EXTRA//--recurrence /_R}"
   echo "  LM Eval $LABEL"
-  timeout "$PIPELINE_TIMEOUT" python3 -m arc.benchmarks.lm_eval_bridge --source "$MODEL_PATH" --variant "$V" $EXTRA --tasks "$TASKS" --device "$DEVICE" --max_loops 4 --seed 0 --limit "${LM_EVAL_LIMIT:-200}" > "$OUTPUT_DIR/lm_eval/${LABEL}.json" 2>&1 || echo "WARN: LM Eval $LABEL failed/timeout, continuing"
+  timeout "$PIPELINE_TIMEOUT" python3 -m arc.benchmarks.lm_eval_bridge --source "$MODEL_PATH" --variant "$V" $EXTRA --tasks "$TASKS" --device "$DEVICE" --max_loops 4 --seed 0 --limit "${LM_EVAL_LIMIT:-200}" --output "$OUTPUT_DIR/lm_eval/${LABEL}.json" || echo "WARN: LM Eval $LABEL failed/timeout, continuing"
 done
 
 echo "[5/5] Done ==="
