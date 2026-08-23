@@ -35,7 +35,7 @@ def test_inference_engine():
     engine = InferenceEngine(source="tiny", variant="base", seed=0)
     ids = torch.randint(2, 128, (1, 16))
     metrics = engine.measure(ids)
-    for k in ["logits","final_hidden","compute_used","executions","elapsed_s","tokens"]:
+    for k in ["compute_used","executions","unit_loop_counts","elapsed_s","tokens","logits_shape","final_hidden_shape"]:
         assert k in metrics
     print("engine ok")
 

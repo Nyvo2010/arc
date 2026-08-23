@@ -4,11 +4,19 @@ Production-ready 7-variant ARC for pretrained MoE Transformers with one-command 
 
 ## Kaggle-ready one-command run
 
+Attach the JetMoE-8B weights as a Kaggle dataset, enable GPU (T4 x2 or P100) and
+internet in notebook settings, then use **Save & Run All (Commit)** for unattended
+execution (GPU sessions up to 9-12h; ~30 GPU hrs/week free quota).
+
 ```bash
-./kaggle_run_all.sh /kaggle/working/models/jetmoe-8b /kaggle/working/arc_results
+./kaggle_run_all.sh /kaggle/input/jetmoe-8b /kaggle/working/arc_results
 ```
 
-Runs preflight checks, parity smoke, synthetic benchmarks, metrics and LM-Eval for all 7 variants with logs and a summary CSV.
+Runs preflight checks, parity smoke, the unified 13-config experiment matrix
+(base + fixed variants at recurrence {2,3,4} + adaptive variants at max_loops=4,
+with full metrics: time, tokens/s, FLOPs, executions, recurrence-per-unit, RAM),
+and LM-Eval for all 7 variants with logs and a summary CSV.
+Results flush incrementally so partial results survive session timeouts.
 
 ## Variants
 

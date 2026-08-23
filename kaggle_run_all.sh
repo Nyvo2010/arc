@@ -4,7 +4,8 @@ trap 'echo "[ERROR] Failed at line $LINENO" >&2; exit 1' ERR
 
 # ARC Kaggle Auto-Run with fail-fast and no-progress guards
 # Usage: ./kaggle_run_all.sh [MODEL_PATH] [OUTPUT_DIR] [DEVICE]
-MODEL_PATH=${1:-/kaggle/working/models/jetmoe-8b}
+# MODEL_PATH: usually a read-only Kaggle dataset mount, e.g. /kaggle/input/jetmoe-8b
+MODEL_PATH=${1:-$(ls -d /kaggle/input/*/ 2>/dev/null | head -1 || echo /kaggle/input/jetmoe-8b)}
 OUTPUT_DIR=${2:-/kaggle/working/arc_results}
 DEVICE=${3:-${KAGGLE_DEVICE:-cuda}}
 
@@ -53,7 +54,9 @@ echo "Log: $LOG"
 bash scripts/preflight_check.sh "$MODEL_PATH" || { echo "Preflight failed"; exit 1; }
 
 pip install -q -e .
-pip install -q -r requirements-kaggle.txt
+# Kaggle images ship a CUDA-matched torch; never reinstall it.
+python3 -c 'import torch' 2>/dev/null || pip install -q torch==2.4.0
+grep -vE '^torch==' requirements-kaggle.txt | pip install -q -r /dev/stdin
 echo "[1/4] Installing complete"
 
 python3 - <<'PY'
@@ -87,35 +90,30 @@ run_stage() {
   echo "[$name] done"
 }
 
-# Synthetic benchmarks
-echo "[2/4] Synthetic benchmarks"
-timeout "$PIPELINE_TIMEOUT" python scripts/benchmark_all.py --source "$MODEL_PATH" --device "$DEVICE" --outdir "$OUTPUT_DIR/synthetic" || { echo "Benchmark_all failed/timeout"; exit 1; }
-[[ -f "$OUTPUT_DIR/synthetic/synthetic_summary.csv" ]] || { echo "No synthetic output"; exit 1; }
+# Unified experiment matrix: 7 variants, fixed ones at R in {2,3,4}, all metrics
+echo "[2/5] Experiment matrix (7 variants, full metrics)"
+timeout "$PIPELINE_TIMEOUT" python scripts/benchmark_matrix.py --source "$MODEL_PATH" --device "$DEVICE" --outdir "$OUTPUT_DIR/matrix" || { echo "Matrix benchmark failed/timeout"; exit 1; }
+[[ -f "$OUTPUT_DIR/matrix/matrix_results.csv" ]] || { echo "No matrix output"; exit 1; }
 
-# Metrics benchmark
-echo "[3/4] Metrics benchmark"
-timeout "$PIPELINE_TIMEOUT" python scripts/benchmark_metrics.py --source "$MODEL_PATH" --device "$DEVICE" --outdir "$OUTPUT_DIR/metrics" || { echo "Benchmark_metrics failed/timeout"; exit 1; }
-[[ -f "$OUTPUT_DIR/metrics/metrics_summary.csv" ]] || { echo "No metrics output"; exit 1; }
-
-# Aggregate summary
+# Aggregate summary (numbers, not just names)
+echo "[3/5] Aggregating summary"
 python3 - <<PY
 import csv, pathlib
 out = pathlib.Path("$OUTPUT_DIR")
 summary = out/"summary.csv"
 with summary.open("w", newline="") as f:
     w = csv.writer(f)
-    w.writerow(["variant","scale","adaptive","source"])
-    syn = out/"synthetic"/"synthetic_summary.csv"
-    if syn.exists():
-        with syn.open() as f:
-            r = csv.DictReader(f)
-            for row in r:
-                w.writerow([row.get("variant"), row.get("scale"), row.get("adaptive"), "synthetic"])
+    src = out/"matrix"/"matrix_results.csv"
+    if src.exists():
+        with src.open() as fh:
+            r = csv.reader(fh)
+            for i, row in enumerate(r):
+                w.writerow(row)
 print("Wrote", summary)
 PY
 
 # LM Eval free tasks
-echo "[4/4] LM Eval benchmarks"
+echo "[4/5] LM Eval benchmarks"
 TASKS="hellaswag,arc_easy,arc_challenge,gsm8k,mmlu"
 mkdir -p "$OUTPUT_DIR/lm_eval"
 for V in base model_fixed block_fixed layer_fixed model_adaptive block_adaptive layer_adaptive; do
@@ -123,5 +121,5 @@ for V in base model_fixed block_fixed layer_fixed model_adaptive block_adaptive 
   timeout "$PIPELINE_TIMEOUT" python -m arc.benchmarks.lm_eval_bridge --source "$MODEL_PATH" --variant "$V" --tasks "$TASKS" --device "$DEVICE" --max_loops 4 --seed 0 > "$OUTPUT_DIR/lm_eval/${V}.json" 2>&1 || echo "WARN: LM Eval $V failed/timeout, continuing"
 done
 
-echo "=== Done ==="
+echo "[5/5] Done ==="
 find "$OUTPUT_DIR" -type f | sort
