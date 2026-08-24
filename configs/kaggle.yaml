@@ -10,10 +10,8 @@ arc:
   recurrence_values: [2, 3, 4]
   variants:
     - base
-    - model_fixed
     - block_fixed
     - layer_fixed
-    - model_adaptive
     - block_adaptive
     - layer_adaptive
 

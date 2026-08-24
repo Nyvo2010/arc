@@ -17,12 +17,11 @@ def create_adapter(
     hf_model = load_jetmoe(source, device_map=device_map)
     return JetMoeAdapter(hf_model, block_size=block_size)
 
+# model-level recurrence is dropped per RESEARCH_PLAN.md locked decision #5
 MODEL_VARIANTS = {
     "base": {"scale": "base", "adaptive": False},
-    "model_fixed": {"scale": "model", "adaptive": False},
     "block_fixed": {"scale": "block", "adaptive": False},
     "layer_fixed": {"scale": "layer", "adaptive": False},
-    "model_adaptive": {"scale": "model", "adaptive": True},
     "block_adaptive": {"scale": "block", "adaptive": True},
     "layer_adaptive": {"scale": "layer", "adaptive": True},
 }

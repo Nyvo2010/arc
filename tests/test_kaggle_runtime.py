@@ -19,8 +19,8 @@ def test_input_device_uses_dispatched_embedding():
 
 def test_config_grid_has_expected_variants():
     grid = benchmark_matrix.config_grid([2, 3, 4], max_loops=4)
-    assert len(grid) == 13
+    assert len(grid) == 9
     assert {row["variant"] for row in grid} == {
-        "base", "model_fixed", "block_fixed", "layer_fixed",
-        "model_adaptive", "block_adaptive", "layer_adaptive",
+        "base", "block_fixed", "layer_fixed",
+        "block_adaptive", "layer_adaptive",
     }

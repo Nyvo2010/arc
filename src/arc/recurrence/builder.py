@@ -14,9 +14,9 @@ def build_model(
     compute_budget: float | None = None,
     controller_kwargs: dict | None = None,
 ):
-    """Unified builder for all 7 variants.
+    """Unified builder for the supported variants.
 
-    scale: 'base' | 'model' | 'block' | 'layer'
+    scale: 'base' | 'block' | 'layer'
     adaptive: False -> fixed recurrence with integer R
               True  -> adaptive HALT/CONTINUE with controller
     """
@@ -27,9 +27,6 @@ def build_model(
     if adaptive:
         controller = make_controller(scale, adapter, max_loops=max_loops, compute_budget=compute_budget)
 
-        if scale == "model":
-            from arc.recurrence.adaptive import ModelAdaptiveRecurrenceLM
-            return ModelAdaptiveRecurrenceLM(adapter, controller)
         if scale == "block":
             from arc.recurrence.adaptive import BlockAdaptiveRecurrenceLM
             return BlockAdaptiveRecurrenceLM(adapter, controller)
@@ -41,9 +38,6 @@ def build_model(
     # fixed
     if recurrence < 1:
         raise ValueError("recurrence must be >= 1 for fixed models")
-    if scale == "model":
-        from arc.recurrence.base import ModelRecurrenceLM
-        return ModelRecurrenceLM(adapter, recurrence)
     if scale == "block":
         from arc.recurrence.base import BlockRecurrenceLM
         return BlockRecurrenceLM(adapter, recurrence)

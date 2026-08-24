@@ -10,13 +10,13 @@ from arc.recurrence.state import RecurrenceState
 
 
 class RecurrentLM(torch.nn.Module, ABC):
-    """Base for the three fixed-recurrence models.
+    """Base for the fixed-recurrence models.
 
     Hidden state always chains forward across repeated executions; the final
     norm + LM head run exactly once after the last execution.
     """
 
-    scale: str = "model"
+    scale: str = "block"
 
     def __init__(self, adapter: ARCAdapter, recurrence: int):
         super().__init__()
@@ -52,10 +52,6 @@ class RecurrentLM(torch.nn.Module, ABC):
                         self.scale, unit_index, seq_len, batch_size=batch_size
                     )
                     hidden = self.execute_unit(unit_index, hidden, ctx)
-                    if self.scale == "model" and iteration + 1 < self.recurrence:
-                        # A complete native JetMoE pass ends with RMSNorm. Apply
-                        # it before chaining into the next model traversal.
-                        hidden = adapter.normalize(hidden)
                     state.compute_used += est
                     state.record_execution(unit_index)
 
@@ -105,21 +101,6 @@ class BaseLM(torch.nn.Module):
         )
 
 
-class ModelRecurrenceLM(RecurrentLM):
-    """H_{t+1} = F(H_t): repeat complete model traversals."""
-
-    scale = "model"
-
-    def __init__(self, adapter: ARCAdapter, num_loops: int):
-        super().__init__(adapter, num_loops)
-
-    def num_units(self) -> int:
-        return 1
-
-    def execute_unit(self, unit_index: int, hidden: Tensor, ctx: ForwardContext) -> Tensor:
-        return self.adapter.forward_model(hidden, ctx)
-
-
 class BlockRecurrenceLM(RecurrentLM):
     """h_{b,r+1} = B_b(h_{b,r}): block = contiguous segment of `block_size` layers."""
 
@@ -145,11 +126,9 @@ class LayerRecurrenceLM(RecurrentLM):
 
 
 def build_recurrent_model(scale: str, adapter: ARCAdapter, recurrence: int) -> RecurrentLM:
-    """Build one of the three models with a uniform fixed recurrence value."""
+    """Build one of the recurrent models with a uniform fixed recurrence value."""
     if not isinstance(recurrence, int):
         raise TypeError("recurrence must be an integer")
-    if scale == "model":
-        return ModelRecurrenceLM(adapter, recurrence)
     if scale == "block":
         return BlockRecurrenceLM(adapter, recurrence)
     if scale == "layer":

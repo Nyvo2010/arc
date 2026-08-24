@@ -17,8 +17,8 @@ class AdaptiveRecurrentLM(torch.nn.Module):
     RecurrenceResult shape for benchmarks.
     """
 
-    scale: str = "model"
-    granularity = "unit"  # unit = layer / block / model
+    scale: str = "block"
+    granularity = "unit"  # unit = layer / block
 
     def __init__(self, adapter: ARCAdapter, controller: RecurrenceController):
         super().__init__()
@@ -56,16 +56,12 @@ class AdaptiveRecurrentLM(torch.nn.Module):
                     est = adapter.unit_flops(self.scale, unit_index, seq_len, batch_size=batch_size)
                     hidden = self.execute_unit(unit_index, hidden, ctx)
 
-                    # Normalize between model loops, every loop after first
-                    if self.scale == "model":
-                        hidden = adapter.normalize(hidden)
-
                     state.compute_used += est
                     state.record_execution(unit_index)
                     rec_count += 1
 
                     # Features for controller
-                    hidden_for_logits = adapter.normalize(hidden) if self.scale != "model" else hidden
+                    hidden_for_logits = adapter.normalize(hidden)
                     logits_cur = adapter.project_logits(hidden_for_logits)
 
                     features = self.controller.build_features(
@@ -90,19 +86,6 @@ class AdaptiveRecurrentLM(torch.nn.Module):
             state.compute_used += adapter.lm_head_flops_per_token() * seq_len * batch_size
 
         return RecurrenceResult(logits=logits, final_hidden=final_hidden, state=state)
-
-
-class ModelAdaptiveRecurrenceLM(AdaptiveRecurrentLM):
-    scale = "model"
-
-    def __init__(self, adapter: ARCAdapter, controller: RecurrenceController):
-        super().__init__(adapter, controller)
-
-    def num_units(self) -> int:
-        return 1
-
-    def execute_unit(self, unit_index: int, hidden: Tensor, ctx: ForwardContext) -> Tensor:
-        return self.adapter.forward_model(hidden, ctx)
 
 
 class BlockAdaptiveRecurrenceLM(AdaptiveRecurrentLM):

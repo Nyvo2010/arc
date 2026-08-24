@@ -19,7 +19,7 @@ def test_tiny_parity():
 
 def test_all_variants_smoke():
     source = "tiny"
-    for scale in ["base", "model", "block", "layer"]:
+    for scale in ["base", "block", "layer"]:
         for adaptive in [False, True]:
             if scale == "base" and adaptive:
                 continue

@@ -10,7 +10,7 @@ Supported tasks (free & widely recognized):
 
 Usage:
   pip install lm-eval[hf]
-  python -m arc.benchmarks.lm_eval_bridge --variant model_adaptive --source tiny --tasks hellaswag,arc_easy
+  python -m arc.benchmarks.lm_eval_bridge --variant block_adaptive --source tiny --tasks hellaswag,arc_easy
 """
 
 from __future__ import annotations

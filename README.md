@@ -1,69 +1,21 @@
 # ARC — Adaptive Recurrence Computing
 
-Production-ready 7-variant ARC for pretrained MoE Transformers with one-command Kaggle runs.
+Quality-per-compute research on block-recurrent JetMoE-8B with learned halting.
+Branch `stage-a-cpt`: trimmed for the three-stage training curriculum
+(Stage A backbone CPT → Stage B threshold calibration → Stage C joint halt-head
+training). Design and pre-declared gates live in `RESEARCH_PLAN.md` (v5).
 
-## Kaggle-ready one-command run
-
-Attach the JetMoE-8B weights as a Kaggle dataset, enable GPU (T4 x2 or P100) and
-internet in notebook settings, then use **Save & Run All (Commit)** for unattended
-execution (GPU sessions up to 9-12h; ~30 GPU hrs/week free quota).
-
-```bash
-./kaggle_run_all.sh /kaggle/working/jetmoe-8b /kaggle/working/arc_results cuda
-```
-
-Runs preflight checks, real-model parity, the unified 13-config experiment matrix
-(base + fixed variants at recurrence {2,3,4} + adaptive variants at max_loops=4,
-with full metrics: time, tokens/s, FLOPs, executions, recurrence-per-unit, RAM),
-and LM-Eval for all 7 variants with logs and a summary CSV.
-The checkpoint is loaded once and reused across all matrix configurations.
-Results flush incrementally so partial results survive session timeouts.
-
-### Kaggle notebook cells
-
-Use `%pip` in the install cell so the package is installed into the active
-notebook kernel. Do not run a separate 8B parity cell; the runner performs the
-real-model parity gate immediately before the matrix and reuses that model.
-
-```python
-%pip install -q -e .[lmeval]
-```
-
-```python
-from pathlib import Path
-from huggingface_hub import login, snapshot_download
-
-token_file = Path("/kaggle/input/hf-secret/hf_token.txt")
-if token_file.exists():
-    login(token_file.read_text().strip())
-
-model_dir = "/kaggle/working/jetmoe-8b"
-snapshot_download(repo_id="jetmoe/jetmoe-8b", local_dir=model_dir)
-print("Model downloaded to", model_dir)
-```
-
-```bash
-!bash /kaggle/working/arc/kaggle_run_all.sh /kaggle/working/jetmoe-8b /kaggle/working/arc_results cuda
-```
-
-If the install cell changes `torch`, `transformers`, or CUDA-related packages,
-restart the Kaggle session before running the download and runner cells. The
-runner intentionally checks the existing environment and does not reinstall
-those packages.
-
-## Variants
+Model-level recurrence is removed (locked decision #5); supported variants:
 
 | Name | Scale | Adaptive | Builder |
 |------|-------|----------|---------|
 | base | base | False | `build_arc_model(source, scale='base')` |
-| model_fixed | model | False | `scale='model', adaptive=False, recurrence=R` |
 | block_fixed | block | False | `scale='block', adaptive=False, recurrence=R` |
 | layer_fixed | layer | False | `scale='layer', adaptive=False, recurrence=R` |
-| model_adaptive | model | True | `scale='model', adaptive=True, max_loops=M` |
 | block_adaptive | block | True | `scale='block', adaptive=True, max_loops=M` |
 | layer_adaptive | layer | True | `scale='layer', adaptive=True, max_loops=M` |
 
-All share `ARCAdapter` interface: `model(input_ids, attention_mask=None, position_ids=None) -> RecurrenceResult`
+All share the `ARCAdapter` interface: `model(input_ids, attention_mask=None, position_ids=None) -> RecurrenceResult`
 
 ## Adapter contract
 
@@ -74,7 +26,9 @@ All share `ARCAdapter` interface: `model(input_ids, attention_mask=None, positio
 - `num_layers`, `num_blocks`
 - `lm_head_flops_per_token`, `unit_flops(scale, unit_index, seq_len, batch_size)`
 
-## HALT heads
+(`forward_model` remains on the adapter for parity verification and FLOPs accounting.)
+
+## Halting
 
 Adaptive variants use HALT heads to decide continue vs halt.
 
@@ -85,25 +39,26 @@ Features:
 - hidden cosine change
 - recurrence count
 
-`ThresholdController` uses these features with configurable thresholds; HALT head probability can be blended for learned control.
+`ThresholdController` uses these features with configurable thresholds; HALT head probability can be blended for learned control. Stage B calibrates these thresholds on the adapted checkpoint; Stage C replaces them with a tiny learned head trained jointly (PonderNet-style expected loss + compute penalty).
 
-## Free community benchmarks
+## Evaluation
 
-`arc_challenge`, `mmlu`, `gsm8k` via `lm-evaluation-harness`. See `TEST_RUN_DESCRIPTION.md`
-for exactly what a full Kaggle run executes, expected runtimes, and limits.
+Loglikelihood benchmarks via `lm-evaluation-harness` through the bridge:
 
-Run via bridge:
 ```bash
 pip install "lm-eval[hf]"
-python -m arc.benchmarks.lm_eval_bridge --source /path/to/jetmoe-8b --variant model_adaptive --tasks arc_challenge,mmlu,gsm8k --device cuda
+python -m arc.benchmarks.lm_eval_bridge --source /path/to/jetmoe-8b --variant block_adaptive --tasks arc_challenge,mmlu,gsm8k --device cuda
 ```
+
+Throughput/halting matrix (`RESULTS.CSV` protocol) and the future Phase 0
+threshold-calibration sweep both reuse `scripts/benchmark_matrix.py`
+(see `run_benchmarks_matrix.sh`).
 
 ## Quick start
 
 ```bash
 pip install -e .
 python -m pytest tests -q
-./kaggle_run_all.sh /path/to/jetmoe-8b ./results
 ```
 
 ## Repo layout
@@ -116,12 +71,12 @@ src/arc/
   inference.py            # unified inference engine
 scripts/
   preflight_check.sh
-  benchmark_all.py
-  benchmark_metrics.py
-kaggle_run_all.sh
+  benchmark_matrix.py     # matrix harness; calibration sweeps build on this
+run_benchmarks_matrix.sh
 ```
 
 Weights are not shipped. Place JetMoE weights under `models/jetmoe-8b/` or pass a HF path.
 Parity gate `JetMoeAdapter.verify_parity` must pass before experiments.
 
-Docs: see `DOCS.md`.
+Docs: `RESEARCH_PLAN.md` (authoritative), `CONTINUED_PRETRAIN_PLAN.md`
+(Kaggle ops details; partially superseded — see banner).

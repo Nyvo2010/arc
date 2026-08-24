@@ -14,8 +14,8 @@ mkdir -p "$OUTDIR"
 pip install -q -e .
 pip install -q "lm-eval[hf]>=0.4.12"
 
-FIXED_VARIANTS=(model_fixed block_fixed layer_fixed)
-ADAPTIVE_VARIANTS=(model_adaptive block_adaptive layer_adaptive)
+FIXED_VARIANTS=(block_fixed layer_fixed)
+ADAPTIVE_VARIANTS=(block_adaptive layer_adaptive)
 BASE_VARIANT=(base)
 
 RECURRENCES=(2 3 4)
