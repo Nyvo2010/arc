@@ -4,9 +4,12 @@ Adaptive (dynamic) recurrence for pretrained MoE Transformers, with a dual
 halting-policy track: the calibrated non-neural `ThresholdController`
 (Policy-T) and a learned neural halt head (Policy-NN, to be built).
 
-Branch `stage-a-cpt` scope: **continued pre-training of adaptive models only**.
-Fixed-R variants and the benchmark harnesses live on `main`; this branch keeps
-the models, inference engine, and ops docs needed for CPT.
+Branch `stage-a-cpt` scope: **continued pre-training of adaptive models only**,
+trained in three stages — backbone adaptation at random recurrence, then
+calibration of the existing halt policy on the frozen checkpoint, then joint
+training of the neural halt head with the unfrozen backbone. Fixed-R variants
+and the benchmark harnesses live on `main`; this branch keeps the models,
+inference engine, and ops docs needed for CPT.
 
 ## Variants
 
@@ -69,5 +72,7 @@ configs/kaggle.yaml       # model + CPT hyperparameters
 
 Weights are not shipped. Place JetMoE weights under `models/jetmoe-8b/` or pass a HF path.
 
-Docs: `RESEARCH_PLAN.md` (curriculum + gates), `CONTINUED_PRETRAIN_PLAN.md`
-(Kaggle ops details; partially superseded — see banner).
+Docs: `PLAN.md` — the single source of truth: three-stage curriculum (Stage A
+random-recurrence CPT → Stage B threshold calibration → Stage C joint neural
+halt head), publication-grade requirements, measurement checklist, gates,
+and Kaggle ops.
