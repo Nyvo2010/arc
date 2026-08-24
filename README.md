@@ -1,19 +1,21 @@
 # ARC — Adaptive Recurrence Computing
 
-Quality-per-compute research on block-recurrent JetMoE-8B with learned halting.
-Branch `stage-a-cpt`: trimmed for the three-stage training curriculum
-(Stage A backbone CPT → Stage B threshold calibration → Stage C joint halt-head
-training). Design and pre-declared gates live in `RESEARCH_PLAN.md` (v5).
+Adaptive (dynamic) recurrence for pretrained MoE Transformers, with a dual
+halting-policy track: the calibrated non-neural `ThresholdController`
+(Policy-T) and a learned neural halt head (Policy-NN, to be built).
 
-Model-level recurrence is removed (locked decision #5); supported variants:
+Branch `stage-a-cpt` scope: **continued pre-training of adaptive models only**.
+Fixed-R variants and the benchmark harnesses live on `main`; this branch keeps
+the models, inference engine, and ops docs needed for CPT.
 
-| Name | Scale | Adaptive | Builder |
-|------|-------|----------|---------|
-| base | base | False | `build_arc_model(source, scale='base')` |
-| block_fixed | block | False | `scale='block', adaptive=False, recurrence=R` |
-| layer_fixed | layer | False | `scale='layer', adaptive=False, recurrence=R` |
-| block_adaptive | block | True | `scale='block', adaptive=True, max_loops=M` |
-| layer_adaptive | layer | True | `scale='layer', adaptive=True, max_loops=M` |
+## Variants
+
+| Name | Scale | Recursion | Builder |
+|------|-------|-----------|---------|
+| base | base | one-pass control | `build_arc_model(source, scale='base')` |
+| model_adaptive | model | HALT/CONTINUE per full traversal, max_loops=M | `scale='model'` |
+| block_adaptive | block | HALT/CONTINUE per transformer block, max_loops=M | `scale='block'` |
+| layer_adaptive | layer | HALT/CONTINUE per layer, max_loops=M | `scale='layer'` |
 
 All share the `ARCAdapter` interface: `model(input_ids, attention_mask=None, position_ids=None) -> RecurrenceResult`
 
@@ -26,39 +28,31 @@ All share the `ARCAdapter` interface: `model(input_ids, attention_mask=None, pos
 - `num_layers`, `num_blocks`
 - `lm_head_flops_per_token`, `unit_flops(scale, unit_index, seq_len, batch_size)`
 
-(`forward_model` remains on the adapter for parity verification and FLOPs accounting.)
+## Halting policies
 
-## Halting
+- **Policy-T (existing):** per-unit halt heads feed hand-calibrated
+  `ThresholdController` thresholds. Features: entropy, entropy_delta,
+  JS divergence, top-1 stability, hidden cosine change, recurrence count.
+  Calibration on the adapted checkpoint is Stage B of the curriculum.
+- **Policy-NN (to build):** tiny learned halt head (~10⁴ params,
+  PonderNet-style expected loss + compute penalty λ·Δcompute), trained jointly
+  with an unfrozen backbone from the Stage-A checkpoint (Stage C).
 
-Adaptive variants use HALT heads to decide continue vs halt.
+## Inference
 
-Features:
-- entropy, entropy_delta
-- JS divergence
-- top-1 stability
-- hidden cosine change
-- recurrence count
+```python
+from arc.inference import InferenceEngine
 
-`ThresholdController` uses these features with configurable thresholds; HALT head probability can be blended for learned control. Stage B calibrates these thresholds on the adapted checkpoint; Stage C replaces them with a tiny learned head trained jointly (PonderNet-style expected loss + compute penalty).
-
-## Evaluation
-
-Loglikelihood benchmarks via `lm-evaluation-harness` through the bridge:
-
-```bash
-pip install "lm-eval[hf]"
-python -m arc.benchmarks.lm_eval_bridge --source /path/to/jetmoe-8b --variant block_adaptive --tasks arc_challenge,mmlu,gsm8k --device cuda
+engine = InferenceEngine(source="models/jetmoe-8b", variant="block_adaptive", max_loops=4)
+result = engine(input_ids)          # -> RecurrenceResult(logits, final_hidden, state)
+metrics = engine.measure(input_ids) # compute_used, executions, unit_loop_counts, timing
 ```
-
-Throughput/halting matrix (`RESULTS.CSV` protocol) and the future Phase 0
-threshold-calibration sweep both reuse `scripts/benchmark_matrix.py`
-(see `run_benchmarks_matrix.sh`).
 
 ## Quick start
 
 ```bash
 pip install -e .
-python -m pytest tests -q
+python -c "from arc.inference import InferenceEngine; print('ok')"
 ```
 
 ## Repo layout
@@ -66,17 +60,14 @@ python -m pytest tests -q
 ```
 src/arc/
   models/                 # JetMoe adapter + registry + factory
-  recurrence/             # fixed & adaptive runtimes, controllers, halt heads, state
-  benchmarks/lm_eval_bridge.py
+  recurrence/             # adaptive runtimes, controllers, halt heads, state
+  common/config.py
   inference.py            # unified inference engine
-scripts/
-  preflight_check.sh
-  benchmark_matrix.py     # matrix harness; calibration sweeps build on this
-run_benchmarks_matrix.sh
+scripts/preflight_check.sh
+configs/kaggle.yaml       # model + CPT hyperparameters
 ```
 
 Weights are not shipped. Place JetMoE weights under `models/jetmoe-8b/` or pass a HF path.
-Parity gate `JetMoeAdapter.verify_parity` must pass before experiments.
 
-Docs: `RESEARCH_PLAN.md` (authoritative), `CONTINUED_PRETRAIN_PLAN.md`
+Docs: `RESEARCH_PLAN.md` (curriculum + gates), `CONTINUED_PRETRAIN_PLAN.md`
 (Kaggle ops details; partially superseded — see banner).

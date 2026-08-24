@@ -12,8 +12,6 @@ def build_arc_model(
     device_map: str | None = "auto",
     architecture: str = "jetmoe",
     *,
-    recurrence: int = 1,
-    adaptive: bool = False,
     max_loops: int = 4,
     compute_budget: float | None = None,
     controller_kwargs: dict | None = None,
@@ -22,6 +20,8 @@ def build_arc_model(
 
     All variants expose the same forward signature:
         model(input_ids, attention_mask=None, position_ids=None) -> RecurrenceResult
+
+    scale='base' -> native one-pass control; otherwise adaptive recurrence.
     """
     adapter: ARCAdapter = create_adapter(
         source=source,
@@ -32,8 +32,6 @@ def build_arc_model(
     model = build_model(
         scale=scale,
         adapter=adapter,
-        recurrence=recurrence,
-        adaptive=adaptive,
         max_loops=max_loops,
         compute_budget=compute_budget,
         controller_kwargs=controller_kwargs,

@@ -5,6 +5,13 @@ zero-shot pilot (commit `66adc00`, quality run `20260823_184315`), the throughpu
 halting matrix (`RESULTS.CSV`, 32 prompts × seq 128, T4, 8-bit), and the v4 design
 review. Supersedes v4 and all earlier scope notes.
 
+> **Branch scope note (`stage-a-cpt`):** work on this branch narrows focus to
+> continued pre-training of the **adaptive recurrence models at all scales**
+> (model/block/layer) plus the base control, and the dual halting-policy track
+> (calibrated ThresholdController + learned neural halt head). This partially
+> supersedes locked decision #5's model-level drop; the fixed-R ablation arms and
+> benchmark harnesses remain on `main` for the Phase 3 evaluation protocol.
+
 ## 0. Decisions locked by this revision
 
 1. **Three-stage training curriculum — halting is never trained from step 0.**

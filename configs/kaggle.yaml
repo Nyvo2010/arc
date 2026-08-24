@@ -7,14 +7,22 @@ model:
 arc:
   seed: 0
   max_loops: 4
-  recurrence_values: [2, 3, 4]
   variants:
     - base
-    - block_fixed
-    - layer_fixed
+    - model_adaptive
     - block_adaptive
     - layer_adaptive
 
-lm_eval:
-  tasks: [arc_challenge, mmlu, gsm8k]
-  loglikelihood_only: true
+cpt:
+  # Stage A (RESEARCH_PLAN Phase 1): QLoRA backbone adaptation
+  method: qlora
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  targets: [q_proj, k_proj, v_proj, o_proj]
+  lr: 1.0e-4
+  warmup_ratio: 0.03
+  seq_len: 1024
+  effective_batch: 16
+  tier_a_tokens: 1000000
+  tier_b_tokens: 50000000

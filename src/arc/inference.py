@@ -10,7 +10,7 @@ from arc.recurrence.builder import build_model
 
 
 class InferenceEngine:
-    """Thin wrapper giving uniform inference for all 7 variants.
+    """Thin wrapper giving uniform inference for base + adaptive variants.
 
     All models expose:
         __call__(input_ids, attention_mask=None, position_ids=None) -> RecurrenceResult
@@ -23,7 +23,6 @@ class InferenceEngine:
         block_size: int = 4,
         device_map: str | None = "auto",
         architecture: str = "jetmoe",
-        recurrence: int = 1,
         max_loops: int = 4,
         controller_kwargs: dict | None = None,
         seed: int = 0,
@@ -38,7 +37,6 @@ class InferenceEngine:
             raise ValueError(f"unknown variant {variant}")
         cfg = MODEL_VARIANTS[variant]
         scale = cfg["scale"]
-        adaptive = cfg["adaptive"]
 
         self.seed = seed
         self.adapter, self.model = self._build(
@@ -47,8 +45,6 @@ class InferenceEngine:
             block_size=block_size,
             device_map=device_map,
             architecture=architecture,
-            recurrence=recurrence,
-            adaptive=adaptive,
             max_loops=max_loops,
             controller_kwargs=controller_kwargs,
         )

@@ -2,11 +2,11 @@
 
 > **Status: partially superseded by `RESEARCH_PLAN.md` (v5).** The data strategy,
 > run design, and resume/session management below remain the operational reference
-> for Stage A. Superseded content: the three per-granularity adapters
-> (model-level is dropped; block_rand is the treatment arm per Phase 1),
-> the 500k-1M warm-up budget (replaced by the Tier A ~1M feasibility gate and
-> Tier B 20-50M token budget), and the old LR schedule (now LR 1e-4 cosine,
-> warmup 3%, QLoRA r=16 alpha=32 on attention projections).
+> for Stage A. Superseded content: the 500k-1M warm-up budget (replaced by the
+> Tier A ~1M feasibility gate and Tier B 20-50M token budget) and the old LR
+> schedule (now LR 1e-4 cosine, warmup 3%, QLoRA r=16 alpha=32 on attention
+> projections). Branch scope note: this branch carries adaptive recurrence at all
+> scales (model/block/layer) plus the base control; fixed-R variants live on main.
 
 Goal: adapt JetMoe-8B weights to recurrence architecture using Kaggle free GPU quota as efficiently as possible. Design for checkpointing, resume, and minimal waste.
 
