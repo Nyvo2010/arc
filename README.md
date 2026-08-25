@@ -5,11 +5,11 @@ halting-policy track: the calibrated non-neural `ThresholdController`
 (Policy-T) and a learned neural halt head (Policy-NN, to be built).
 
 Branch `stage-a-cpt` scope: **continued pre-training of adaptive models only**,
-trained in three stages — backbone adaptation at random recurrence, then
-calibration of the existing halt policy on the frozen checkpoint, then joint
-training of the neural halt head with the unfrozen backbone. Fixed-R variants
-and the benchmark harnesses live on `main`; this branch keeps the models,
-inference engine, and ops docs needed for CPT.
+trained in five stages — backbone adaptation at random recurrence, calibrate
+non-neural halt policy, train neural halt head, chase-the-leader distillation/
+calibration loop, then exploit winner & deploy. Fixed-R variants and benchmark
+harnesses live on `main`; this branch keeps the models, inference engine, and
+ops docs needed for CPT.
 
 ## Variants
 
@@ -72,7 +72,8 @@ configs/kaggle.yaml       # model + CPT hyperparameters
 
 Weights are not shipped. Place JetMoE weights under `models/jetmoe-8b/` or pass a HF path.
 
-Docs: `PLAN.md` — the single source of truth: three-stage curriculum (Stage A
-random-recurrence CPT → Stage B threshold calibration → Stage C joint neural
-halt head), publication-grade requirements, measurement checklist, gates,
-and Kaggle ops.
+Docs: `PLAN.md` — the single source of truth: five-stage curriculum
+(Stage A random-recurrence CPT → Stage B1 threshold calibration → Stage B2
+neural halt head training → Stage C chase-the-leader distillation/calibration
+→ Stage D exploit winner & deploy), publication-grade requirements, measurement
+checklist, gates, and ops.

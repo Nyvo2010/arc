@@ -6,7 +6,7 @@ Single source of truth for the `stage-a-cpt` branch. Supersedes and replaces
 ## 1. What we are doing
 
 We adapt JetMoE-8B into **adaptive (dynamic) recurrence models** and train them
-in three stages, in this order:
+in four stages, in this order:
 
 1. **Stage A — adapt the backbone at random recurrence.** Train the recurrent
    backbone with depth-randomized loops (random depth ∈ {1..4} per forward,
@@ -14,22 +14,29 @@ in three stages, in this order:
    under varying recursion and to produce clean shallow-pass representations.
    This produces THE shared checkpoint for everything downstream, plus an
    equal-budget `base` control trained identically minus recurrence.
-2. **Stage B — calibrate the non-neural halt policy.** Freeze the adapted
+2. **Stage B1 — calibrate non-neural halt policy.** Freeze the adapted
    backbone; calibrate the existing `ThresholdController` thresholds on it
-   (Policy-T). This is both the fallback deployment point and the bar Stage C
-   must beat.
-3. **Stage C — joint training with a neural halt head.** Unfreeze the backbone;
+   (Policy-T). This is the rule-based baseline and fallback.
+3. **Stage B2 — train neural halt head.** Unfreeze the backbone lightly;
    build and train a tiny learned halt head (~10⁴ params) jointly with it
    (Policy-NN): PonderNet-style expected next-token loss with a compute penalty
-   `Δquality − λ·Δcompute`, λ ∈ {0.5, 1.0} — quality counts equally or more
-   than compute savings. Backbone LR dropped ~10× vs Stage A (adapter refresh).
-   All-at-once: head + transformer trained together, initialized from Stage-A
-   weights, judged against Stage-B's operating point.
+   `Δquality − λ·Δcompute`, λ ∈ {0.5, 1.0}. Backbone LR dropped ~10× vs Stage A.
+   Initialized from Stage-A weights.
+4. **Stage C — chase the leader.** Evaluate Policy-T vs Policy-NN on validation.
+   Keep the leader. If Policy-T leads, distill/train Policy-NN to mimic T’s
+   decisions. If Policy-NN leads, calibrate Policy-T thresholds to match NN’s
+   operating point. Iterate calibrate/train until convergence or clear winner.
+5. **Stage D — exploit winner & deploy.** Continue calibration/training of the
+   winning head only, final operating-point sweep post-training. Recalibrate
+   thresholds/operating point without exception — training sets capability,
+   post-hoc sweeps set the operating point (target average recursion ≈ 1.3–1.5× base).
 
-Every stage has a cheap kill gate; a Stage-C collapse still leaves Stage B as a
-working deployment point. Deployment halting is recalibrated post-training
-without exception — training sets capability, post-hoc sweeps set the operating
-point (target average recursion ≈ 1.3–1.5× base).
+Base control is trained in parallel with Stage A using equal budget but without
+recurrence. Adaptive variants share the Stage-A checkpoint; Stages B1–D are run
+per variant (model/block/layer) with the same schedule.
+
+Every stage has a cheap kill gate; a Stage-C collapse still leaves Stage B1 as a
+working deployment point.
 
 ## 2. Evidence so far (zero-shot pilot — motivates, does not confirm)
 
@@ -98,25 +105,21 @@ incrementally flushed so partial results survive session timeouts.
 | G1 | Controller repairs pass regression tests | fix before any sweep |
 | G2 | Tier A: recurrent val loss < its own step-0 AND ARC-Easy-val within 2 pts of control | stop, rethink objective |
 | G3 | Tier B treatment ≥ base control on ARC-Easy-val | negative/mechanistic paper — still publishable |
-| G4 | Stage C beats Stage-B Pareto front by ≥2 pts acc_norm at equal avg recursion, val ppl within 2% | deploy Policy-T |
+| G4 | Stage B2 trains without collapse, Policy-NN not worse than Policy-T by >2 pts acc_norm at equal avg recursion | continue to Stage C |
 | G5 | Pre-registration frozen before final eval | no final eval |
+| G6 | Stage C chase-the-leader converges or clear winner emerges | document decision rationale |
 
-## 7. Compute budget & ops (Kaggle)
-
-~30 free GPU-h/week, T4 x2 / P100 16 GB, 9–12 h sessions, only `/kaggle/working`
-persists. Never reinstall torch. QLoRA (4-bit nf4 base, bf16 LoRA r=16 α=32 on
-q/k/v/o projections) — full FT is infeasible on 16 GB for 8B.
+## 7. Compute budget & ops
 
 Token budget: **Tier A ≈ 1M tokens** (feasibility gate, 1–3 GPU-h ×2 runs);
-**Tier B = 20–50M tokens** (wikitext-103 + C4 slice, ≥1 epoch, 15–40 GPU-h ×2).
+**Tier B = 20–50M tokens** (wikitext-103 + C4 slice, ≥1 epoch).
 If Tier-B losses have not plateaued by end of budget, extend rather than
 declare convergence early. Hyperparameters: LR 1e-4 cosine, warmup 3%,
 seq_len 1024 (2048 if VRAM allows), effective batch 16 via grad accumulation.
 
 Ops rules: preflight checks before each session; load weights once; checkpoint
-every 500 steps to `/kaggle/working/checkpoints/`; auto-resume from latest
-checkpoint; CSV metric logging; stream datasets in small batches and
-pre-tokenize into reusable shards; monitor first 5 min then auto-cancel on stalls.
+every 500 steps; auto-resume from latest checkpoint; CSV metric logging; stream
+datasets in small batches and pre-tokenize into reusable shards; monitor first 5
+min then auto-cancel on stalls.
 
-Rough schedule: W1 infra + Tier A → W2–3 Tier B ×2 → W4 Stages B+C → W5+
-full evaluation (all configs × suite × 3 seeds + external refs).
+Rough schedule: W1 infra + Tier A → W2–3 Tier B1 + B2 → W4 Stage C chase-the-leader → W5+ full evaluation (all configs × suite × 3 seeds + external refs).
