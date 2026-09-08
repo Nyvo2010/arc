@@ -1,6 +1,11 @@
+# Stage-A config (PLAN Stage A: random-recurrence QLoRA CPT, Tier A = 1M tokens).
+# Single source of truth for data, model, CPT hyperparameters, logging.
+
 model:
   name: jetmoe-8b
+  # Kaggle: attach the jetmoe-8b weights dataset; copy/symlink it here (see docs/KAGGLE_RUN.md).
   path: /kaggle/working/jetmoe-8b
+  tokenizer_path: /kaggle/working/jetmoe-8b
   block_size: 4
   device_map: auto
 
@@ -12,17 +17,45 @@ arc:
     - model_adaptive
     - block_adaptive
     - layer_adaptive
+  # Random depth per forward: PLAN Stage A (mass biased toward 1-2).
+  depth_dist: {1: 0.4, 2: 0.3, 3: 0.2, 4: 0.1}
 
 cpt:
-  # Stage A (RESEARCH_PLAN Phase 1): QLoRA backbone adaptation
   method: qlora
-  lora_r: 16
-  lora_alpha: 32
-  lora_dropout: 0.05
-  targets: [q_proj, k_proj, v_proj, o_proj]
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    # JetMoE has NO q/k/v/o_proj (MoA attention). kv_proj is the only dense
+    # attention Linear stock PEFT can target; experts are ParallelExperts.
+    targets: [kv_proj]
   lr: 1.0e-4
   warmup_ratio: 0.03
+  weight_decay: 0.0
+  max_grad_norm: 1.0
   seq_len: 1024
   effective_batch: 16
+  micro_batch: 1
+  gradient_checkpointing: true
   tier_a_tokens: 1000000
   tier_b_tokens: 50000000
+  # Tier A is ~61 steps (1M / (1024*16)); checkpoint often so timeouts lose little.
+  log_every: 5
+  eval_every: 20
+  checkpoint_every: 30
+  # Per-loop-position losses every N steps (model scale only; 0 = off).
+  per_loop_loss_every: 20
+  output_dir: /kaggle/working/checkpoints/stage-a
+
+data:
+  # Streaming mix; weights are sampling probabilities for interleaving.
+  datasets:
+    - {name: wikitext, config: wikitext-103-raw-v1, weight: 0.5, split: train}
+    - {name: allenai/c4, config: en, weight: 0.5, split: train}
+  val_batches: 8
+  # Local/dev only: synthetic random batches + tiny model (no network).
+  synthetic: false
+
+eval:
+  # ARC-Easy-val probe harness lands in Tier B; G2 reports partial until then.
+  arc_easy_probe: false

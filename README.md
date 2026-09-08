@@ -64,10 +64,15 @@ python -c "from arc.inference import InferenceEngine; print('ok')"
 src/arc/
   models/                 # JetMoe adapter + registry + factory
   recurrence/             # adaptive runtimes, controllers, halt heads, state
+  training/               # Stage-A CPT: random recurrence, data, trainer, gates
   common/config.py
   inference.py            # unified inference engine
+scripts/train_stage_a.py  # Stage-A launcher (one/all variants, auto-resume)
 scripts/preflight_check.sh
-configs/kaggle.yaml       # model + CPT hyperparameters
+configs/kaggle.yaml       # model + data + CPT hyperparameters
+notebooks/kaggle_stage_a.ipynb
+docs/KAGGLE_RUN.md        # weight upload + run order + G2 check
+tests/                    # G1 controller gate + training/data/metrics tests
 ```
 
 Weights are not shipped. Place JetMoE weights under `models/jetmoe-8b/` or pass a HF path.

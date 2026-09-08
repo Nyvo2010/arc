@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from arc.models.registry import create_adapter
-from arc.recurrence.builder import build_model
 from arc.models.base import ARCAdapter
 
 
@@ -29,6 +28,9 @@ def build_arc_model(
         device_map=device_map,
         architecture=architecture,
     )
+    # Lazy: arc.recurrence.builder imports arc.models at module level.
+    from arc.recurrence.builder import build_model
+
     model = build_model(
         scale=scale,
         adapter=adapter,

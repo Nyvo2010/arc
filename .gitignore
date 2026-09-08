@@ -21,7 +21,7 @@ env/
 *.bin
 models/jetmoe-8b/
 checkpoints/
-
+!checkpoints/.gitkeep
 .kaggle/
 results/
 prompts/
