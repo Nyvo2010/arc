@@ -1,0 +1,62 @@
+# Phase 1 Tier B — meaningful CPT (50M tokens). Only run if Tier A G2-lite passes:
+# every adaptive variant's best val_loss < its own step-0 val_loss.
+# Same data mix, base weights, and hyperparameters as Tier A.
+
+model:
+  name: jetmoe-8b
+  hf_id: jetmoe/jetmoe-8b
+  path: /kaggle/working/jetmoe-8b
+  tokenizer_path: /kaggle/working/jetmoe-8b
+  block_size: 4
+  device_map: auto
+
+arc:
+  seed: 1
+  max_loops: 4
+  variants:
+    - model_adaptive
+    - block_adaptive
+    - layer_adaptive
+  depth_dist: {1: 0.4, 2: 0.3, 3: 0.2, 4: 0.1}
+
+cpt:
+  method: qlora
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    targets: [kv_proj]
+  lr: 1.0e-4
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  seq_len: 1024
+  effective_batch: 16
+  micro_batch: 1
+  gradient_checkpointing: true
+  tier_a_tokens: 1000000
+  tier_b_tokens: 50000000
+  log_every: 5
+  eval_every: 100
+  checkpoint_every: 250
+  per_loop_loss_every: 100
+  output_dir: /kaggle/working/checkpoints/phase1-tier-b
+
+data:
+  datasets:
+    - {name: HuggingFaceFW/fineweb-edu, config: sample-10BT, weight: 0.5, split: train}
+    - {name: HuggingFaceTB/cosmopedia, config: auto_math_text, weight: 0.2, split: train}
+    - {name: HuggingFaceTB/cosmopedia, config: khanacademy, weight: 0.1, split: train}
+    - {name: open-web-math/open-web-math, weight: 0.1, split: train}
+    - {name: Salesforce/wikitext, config: wikitext-103-raw-v1, weight: 0.1, split: train}
+  val_datasets:
+    - {name: Salesforce/wikitext, config: wikitext-103-raw-v1, split: validation}
+  val_batches: 16
+  synthetic: false
+
+eval:
+  arc_easy_probe: false
+
+hub:
+  repo_id: Nyvo/arc-jetmoe-recurrence-phase1
+  push_best: true
