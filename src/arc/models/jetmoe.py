@@ -162,18 +162,24 @@ def load_jetmoe(path: str, device_map: str | None = "auto"):
 
     has_gpu = torch.cuda.is_available()
     if has_gpu and device_map not in (None, "cpu"):
-        # GPU path: 8-bit quant
+        # GPU path: 4-bit NF4 quant (real QLoRA). 8-bit + prepare_model_for_kbit_training
+        # upcasts to fp32 and OOMs a 15GB T4 before training starts; 4-bit base is ~4GB.
         try:
             model = AutoModelForCausalLM.from_pretrained(
                 path,
-                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                quantization_config=BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_use_double_quant=True,
+                ),
                 device_map=device_map or "auto",
             )
             model.eval()
             return model
         except Exception as e:
             raise RuntimeError(
-                "Could not load JetMoE-8B in 8-bit on CUDA. Install a compatible "
+                "Could not load JetMoE-8B in 4-bit on CUDA. Install a compatible "
                 "bitsandbytes build or use a Kaggle GPU runtime."
             ) from e
 
