@@ -51,6 +51,15 @@ def _linear_names(model) -> list[str]:
     return [n for n, m in model.named_modules() if isinstance(m, torch.nn.Linear)]
 
 
+def _device_loss(logits, input_ids):
+    """Shifted next-token loss with labels moved to the logits device.
+
+    With device_map auto the dispatched model may return logits on a
+    different GPU than the input batch; the loss must live on one device.
+    """
+    return causal_lm_loss(logits, input_ids.to(logits.device))
+
+
 def setup_qlora(hf_model, lora_cfg: dict):
     """Wrap ``hf_model`` with LoRA in place; return (peft_wrapper, trainable_names).
 
@@ -174,15 +183,14 @@ def train_stage_a(
 
     # --- model ---
     source = model_cfg.get("path", "tiny")
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    if torch.cuda.is_available():
-        torch.cuda.set_device(0)
-    # Single-GPU pin: the custom recurrence forward + loss assume one device;
-    # device_map auto splits across T4x2 (cuda:0 vs cuda:1) and breaks the loss.
-    # A 4-bit 8B base fits one T4.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # device_map auto: 4-bit base + fp16 experts split across T4x2 (a single T4
+    # cannot hold the fp16 MoE experts at load). Forward outputs may land on a
+    # different GPU than the inputs, so every loss call moves labels to the
+    # logits device (see _device_loss below).
     adapter = create_adapter(
         source, block_size=int(model_cfg.get("block_size", 4)),
-        device_map=None if source == "tiny" else {"": 0},
+        device_map=None if source == "tiny" else model_cfg.get("device_map", "auto"),
     )
     hf_model = adapter.hf_model
     if source == "tiny" and str(device).startswith("cuda"):
@@ -240,10 +248,10 @@ def train_stage_a(
         total_flops = float(state.get("total_flops", 0.0))
         ts = run_dir / "trainable_state.pt"
         if ts.exists():
-            hf_model.load_state_dict(torch.load(ts, map_location=device), strict=False)
+            hf_model.load_state_dict(torch.load(ts, map_location="cpu"), strict=False)
         os_ = run_dir / "optim_state.pt"
         if os_.exists():
-            optimizer.load_state_dict(torch.load(os_, map_location=device))
+            optimizer.load_state_dict(torch.load(os_, map_location="cpu"))
         print(f"[stage-a] resumed {variant} at step {step} ({tokens_processed:,} tokens)")
 
     depth_rng = random.Random(seed + step)
@@ -310,7 +318,7 @@ def train_stage_a(
             else:
                 break  # streaming val slice evaluated below
             out = random_recurrence_forward(adapter, scale, batch["input_ids"].to(device), depth=1)
-            losses.append(float(causal_lm_loss(out["logits"], batch["input_ids"].to(device))))
+            losses.append(float(_device_loss(out["logits"], batch["input_ids"].to(device))))
         if not synthetic:
             val_gen = build_streaming_loader(
                 val_specs, tokenizer, seq_len, micro_batch, seed=seed + 999, split="validation",
@@ -318,7 +326,7 @@ def train_stage_a(
             )
             for b in val_gen:
                 out = random_recurrence_forward(adapter, scale, b["input_ids"].to(device), depth=1)
-                losses.append(float(causal_lm_loss(out["logits"], b["input_ids"].to(device))))
+                losses.append(float(_device_loss(out["logits"], b["input_ids"].to(device))))
         hf_model.train()
         val_loss = sum(losses) / max(1, len(losses))
         return {"val_loss": val_loss, "val_ppl": math.exp(min(val_loss, 20.0))}
@@ -335,7 +343,7 @@ def train_stage_a(
         out = random_recurrence_forward(
             adapter, scale, input_ids, depth=depth, track_per_loop=track, use_checkpoint=use_checkpoint
         )
-        loss = causal_lm_loss(out["logits"], input_ids) / accum
+        loss = _device_loss(out["logits"], input_ids) / accum
         loss.backward()
         running_loss += float(loss.detach()) * accum
         total_flops += float(out["flops_est"]) * eff_batch / micro_batch
@@ -343,7 +351,7 @@ def train_stage_a(
 
         per_loop_str = ""
         if track and out.get("per_loop_logits"):
-            pls = [round(float(causal_lm_loss(pl, input_ids)), 4) for pl in out["per_loop_logits"]]
+            pls = [round(float(_device_loss(pl, input_ids)), 4) for pl in out["per_loop_logits"]]
             per_loop_str = f" per_loop={pls}"
 
         if (step + 1) % accum == 0:
