@@ -73,13 +73,14 @@ def setup_qlora(hf_model, lora_cfg: dict):
             "JetMoE has no q/k/v/o_proj; use ['kv_proj']."
         )
     # Manual k-bit prep: stock prepare_model_for_kbit_training upcasts large
-    # weights to fp32 and OOMs a 15GB T4. Freeze base, keep norms in fp32,
+    # weights to fp32 and OOMs a 15GB T4. Freeze base, force ONE uniform dtype
+    # (fp16 = bnb compute dtype) so quantized linears never see mixed dtypes,
     # enable input grads so per-loop gradient checkpointing has a grad source.
     for p in hf_model.parameters():
         p.requires_grad = False
     for n, p in hf_model.named_parameters():
         if p.ndim == 1:
-            p.data = p.data.to(torch.float32)
+            p.data = p.data.to(torch.float16)
     if hasattr(hf_model, "enable_input_require_grads"):
         hf_model.enable_input_require_grads()
     else:
