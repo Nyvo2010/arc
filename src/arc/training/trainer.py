@@ -165,7 +165,10 @@ def train_stage_a(
     micro_batch = int(cpt.get("micro_batch", 1))
     accum = max(1, eff_batch // micro_batch)
     tier_tokens = int(cpt.get(f"tier_{tier}_tokens", cpt.get("tier_a_tokens", 1_000_000)))
-    tokens_per_step = seq_len * eff_batch
+    # Budget accounting: the loop below consumes micro_batch*seq_len tokens per
+    # iteration (optimizer steps every `accum` iterations). Counting effective
+    # batches here under-ran Tier A to ~6% of its token target in r1.
+    tokens_per_step = seq_len * micro_batch
     total_steps = max_steps or max(1, math.ceil(tier_tokens / tokens_per_step))
 
     log_every = int(cpt.get("log_every", 5))
@@ -269,12 +272,18 @@ def train_stage_a(
     tok_last_log = tokens_processed
     running_loss = 0.0
 
+    def _trainable_state() -> dict:
+        # Source of truth for weights: PEFT LoRA params. (Filtering
+        # base-model state_dict() by requires_grad yields stubs because
+        # state_dict detaches; the live test: adapters/*.safetensors differ
+        # per variant while the old .pt stubs were byte-identical.)
+        if peft_wrapper is not None:
+            return {k: v.cpu() for k, v in peft_wrapper.state_dict().items() if "lora_" in k}
+        return {k: v.cpu() for k, v in hf_model.state_dict().items() if v.requires_grad}
+
     def save_checkpoint(final: bool = False) -> None:
         tag = "final" if final else f"step-{step}"
-        torch.save(
-            {k: v.cpu() for k, v in hf_model.state_dict().items() if v.requires_grad},
-            run_dir / "trainable_state.pt",
-        )
+        torch.save(_trainable_state(), run_dir / "trainable_state.pt")
         if peft_wrapper is not None:
             peft_wrapper.save_pretrained(str(run_dir / "adapters"))
         torch.save(optimizer.state_dict(), run_dir / "optim_state.pt")
@@ -291,10 +300,7 @@ def train_stage_a(
         print(f"[stage-a] checkpoint {tag} @ step {step}")
 
     def save_best(val_loss: float) -> None:
-        torch.save(
-            {k: v.cpu() for k, v in hf_model.state_dict().items() if v.requires_grad},
-            run_dir / "best_state.pt",
-        )
+        torch.save(_trainable_state(), run_dir / "best_state.pt")
         if peft_wrapper is not None:
             peft_wrapper.save_pretrained(str(run_dir / "adapters-best"))
         best = {
