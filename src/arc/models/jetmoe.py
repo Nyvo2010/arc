@@ -170,7 +170,7 @@ def load_jetmoe(path: str, device_map: str | None = "auto"):
                 quantization_config=BitsAndBytesConfig(
                     load_in_4bit=True,
                     bnb_4bit_quant_type="nf4",
-                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_compute_dtype=torch.float16,  # T4-safe (no bf16 on Turing)
                     bnb_4bit_use_double_quant=True,
                 ),
                 device_map=device_map or "auto",

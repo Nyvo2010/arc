@@ -59,7 +59,7 @@ def setup_qlora(hf_model, lora_cfg: dict):
     (e.g. stock LLaMA target names on JetMoE would silently train nothing).
     """
     try:
-        from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+        from peft import LoraConfig, get_peft_model
     except ImportError as e:
         raise RuntimeError("method=qlora requires 'peft' (pip install peft)") from e
 
@@ -72,7 +72,34 @@ def setup_qlora(hf_model, lora_cfg: dict):
             f"Available leaf names include: {cands[:20]}. "
             "JetMoE has no q/k/v/o_proj; use ['kv_proj']."
         )
-    hf_model = prepare_model_for_kbit_training(hf_model)
+    # Manual k-bit prep: stock prepare_model_for_kbit_training upcasts large
+    # weights to fp32 and OOMs a 15GB T4. Freeze base, keep norms in fp32,
+    # enable input grads so per-loop gradient checkpointing has a grad source.
+    for p in hf_model.parameters():
+        p.requires_grad = False
+    for n, p in hf_model.named_parameters():
+        if p.ndim == 1:
+            p.data = p.data.to(torch.float32)
+    if hasattr(hf_model, "enable_input_require_grads"):
+        hf_model.enable_input_require_grads()
+    else:
+        def _hook(module, inp, out):
+            out.requires_grad_(True)
+        try:
+            hf_model.get_input_embeddings().register_forward_hook(_hook)
+        except Exception:
+            pass
+    if hasattr(hf_model, "gradient_checkpointing_enable"):
+        try:
+            hf_model.gradient_checkpointing_enable()
+        except Exception:
+            pass
+    try:
+        cfg = getattr(hf_model, "config", None)
+        if cfg is not None and hasattr(cfg, "use_cache"):
+            cfg.use_cache = False
+    except Exception:
+        pass
     peft_cfg = LoraConfig(
         r=int(lora_cfg.get("r", 16)),
         lora_alpha=int(lora_cfg.get("alpha", 32)),
