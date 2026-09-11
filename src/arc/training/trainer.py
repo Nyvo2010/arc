@@ -174,12 +174,18 @@ def train_stage_a(
 
     # --- model ---
     source = model_cfg.get("path", "tiny")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        torch.cuda.set_device(0)
+    # Single-GPU pin: the custom recurrence forward + loss assume one device;
+    # device_map auto splits across T4x2 (cuda:0 vs cuda:1) and breaks the loss.
+    # A 4-bit 8B base fits one T4.
     adapter = create_adapter(
-        source, block_size=int(model_cfg.get("block_size", 4)), device_map=None if source == "tiny" else "auto"
+        source, block_size=int(model_cfg.get("block_size", 4)),
+        device_map=None if source == "tiny" else {"": 0},
     )
     hf_model = adapter.hf_model
-    if source == "tiny" and device == "cuda":
+    if source == "tiny" and str(device).startswith("cuda"):
         hf_model = hf_model.to(device)
     method = cpt.get("method", "qlora")
     peft_wrapper = None
