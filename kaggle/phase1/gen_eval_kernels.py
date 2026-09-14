@@ -99,22 +99,19 @@ for c in csvs:
     print("saved", c)
 rows = []
 for c in csvs:
-    for r in csv.DictReader(open(c)):
-        if r.get("task") and r.get("key"):
-            rows.append(r)
-import json
+    rows.extend(csv.DictReader(open(c)))
+mcq = ["arc_easy", "arc_challenge", "hellaswag", "piqa", "winogrande", "boolq", "sciq"]
 def g(key, task, depth):
     for r in rows:
-        if r["key"] == key and r["task"] == task and int(r.get("depth", 1) or 1) == int(depth or 1):
+        if r["model"] == key and r["task"] == task and int(r.get("depth", 1) or 1) == int(depth or 1):
             return r
     return None
-keys = ["base", "model_adaptive", "block_adaptive", "layer_adaptive"]
-for key in keys:
+for key in ["base", "model_adaptive", "block_adaptive", "layer_adaptive"]:
     print("\\n===", key, "===")
-    for task in ["arc_easy", "arc_challenge", "hellaswag", "piqa", "winogrande", "boolq", "sciq"]:
+    for task in mcq:
         r = g(key, task, 1)
         if r: print(f"  {{task:14s}} acc={{float(r['acc'])*100:5.1f}}  acc_norm={{float(r['acc_norm'])*100:5.1f}}")
-    r = g(key, "wikitext_ppl", 1) or g(key, "wikitext", 1)
+    r = g(key, "wikitext", 1)
     if r: print(f"  wikitext      ppl={{float(r['ppl']):6.1f}}")"""),
         src_cell("""import json, os
 if os.environ.get("HF_TOKEN"):
