@@ -73,13 +73,15 @@ else:
 
 def build_metadata(variant: str) -> dict:
     return {
-        "id": f"arc-tierb-{variant}",
+        "id": f"niyuvo/arc-tierb-{variant}",
         "title": f"ARC CPT Tier B {variant}",
+        "code_file": f"arc-tierb-{variant}.ipynb",
         "language": "python",
         "kernel_type": "notebook",
         "is_private": True,
         "enable_gpu": True,
         "enable_internet": True,
+        "machine_shape": "NvidiaTeslaT4",
         "competition_sources": [],
         "dataset_sources": [],
         "kernel_sources": [],
@@ -91,7 +93,7 @@ def main() -> None:
     for variant in VARIANTS:
         d = HERE / f"tierb-{variant}"
         d.mkdir(parents=True, exist_ok=True)
-        (d / "arc-tierb.ipynb").write_text(json.dumps(build_notebook(variant), indent=1))
+        (d / f"arc-tierb-{variant}.ipynb").write_text(json.dumps(build_notebook(variant), indent=1))
         (d / "kernel-metadata.json").write_text(json.dumps(build_metadata(variant), indent=2))
         print("wrote", d)
 
