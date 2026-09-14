@@ -1,6 +1,11 @@
-# Phase 1 Tier B — meaningful CPT (50M tokens). Only run if Tier A G2-lite passes:
-# every adaptive variant's best val_loss < its own step-0 val_loss.
-# Same data mix, base weights, and hyperparameters as Tier A.
+# Phase 1 Tier B — meaningful CPT (20M tokens/variant, ~20x Tier A).
+# Only run if Tier A G2-lite passes. Same base weights/hyperparameters as
+# Tier A; data mix re-weighted toward high-quality sources (FineWeb-Edu,
+# Cosmopedia textbook/math-reasoning, OpenWebMath).
+#
+# Sessions: Kaggle kernels cap at ~12h. train_stage_a(max_runtime_s=...) saves
+# a final checkpoint and exits cleanly; rerunning the same kernel resumes from
+# train_state.json until tier_b_tokens is consumed.
 
 model:
   name: jetmoe-8b
@@ -35,27 +40,28 @@ cpt:
   micro_batch: 1
   gradient_checkpointing: true
   tier_a_tokens: 1000000
-  tier_b_tokens: 50000000
+  tier_b_tokens: 20000000
   log_every: 5
   eval_every: 100
   checkpoint_every: 250
   per_loop_loss_every: 100
+  max_runtime_s: 36000
   output_dir: /kaggle/working/checkpoints/phase1-tier-b
 
 data:
   datasets:
-    - {name: HuggingFaceFW/fineweb-edu, config: sample-10BT, weight: 0.5, split: train}
+    - {name: HuggingFaceFW/fineweb-edu, config: sample-10BT, weight: 0.55, split: train}
     - {name: HuggingFaceTB/cosmopedia, config: auto_math_text, weight: 0.2, split: train}
     - {name: HuggingFaceTB/cosmopedia, config: khanacademy, weight: 0.1, split: train}
     - {name: open-web-math/open-web-math, weight: 0.1, split: train}
-    - {name: Salesforce/wikitext, config: wikitext-103-raw-v1, weight: 0.1, split: train}
+    - {name: Salesforce/wikitext, config: wikitext-103-raw-v1, weight: 0.05, split: train}
   val_datasets:
     - {name: Salesforce/wikitext, config: wikitext-103-raw-v1, split: validation}
   val_batches: 16
   synthetic: false
 
 eval:
-  arc_easy_probe: false
+  arc_easy_probe: true
 
 hub:
   repo_id: Nyvo/arc-jetmoe-recurrence-phase1

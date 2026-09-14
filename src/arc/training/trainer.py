@@ -146,8 +146,15 @@ def train_stage_a(
     resume: bool = True,
     probe_fn=None,
     run_id: str | None = None,
+    max_runtime_s: float | None = None,
 ) -> dict:
-    """Run Stage-A CPT for one variant. Returns a summary dict."""
+    """Run Stage-A CPT for one variant. Returns a summary dict.
+
+    ``max_runtime_s`` cleanly stops after that many wall-clock seconds
+    (saving a final checkpoint first) so a kernel session can self-terminate
+    before the hosting platform kills it — the next session resumes from
+    ``train_state.json``.
+    """
     from arc.models.registry import MODEL_VARIANTS
 
     if variant not in MODEL_VARIANTS:
@@ -177,6 +184,8 @@ def train_stage_a(
     per_loop_every = int(cpt.get("per_loop_loss_every", 0))
     val_batches = int(data_cfg.get("val_batches", 8))
     use_checkpoint = bool(cpt.get("gradient_checkpointing", True))
+    if max_runtime_s is None:
+        max_runtime_s = cpt.get("max_runtime_s")
 
     run_dir = Path(output_dir) / variant if run_id is None else Path(output_dir) / run_id / variant
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -251,7 +260,28 @@ def train_stage_a(
         total_flops = float(state.get("total_flops", 0.0))
         ts = run_dir / "trainable_state.pt"
         if ts.exists():
-            hf_model.load_state_dict(torch.load(ts, map_location="cpu"), strict=False)
+            loaded = torch.load(ts, map_location="cpu")
+            if not isinstance(loaded, dict) or not loaded:
+                raise RuntimeError(f"resume failed: {ts} is empty/invalid")
+            # trainable_state.pt is saved from peft_wrapper.state_dict() filtered to
+            # lora_* keys, so it must be loaded back into the peft_wrapper (its
+            # parameters alias the same tensors inside hf_model). Loading into
+            # raw hf_model would silently drop every LoRA key.
+            target = peft_wrapper if peft_wrapper is not None else hf_model
+            current = target.state_dict()
+            missing = [k for k in loaded if k not in current]
+            shape_bad = [
+                k for k in (set(loaded) - set(missing)) if tuple(loaded[k].shape) != tuple(current[k].shape)
+            ]
+            if missing:
+                raise RuntimeError(
+                    f"resume failed: {len(missing)} checkpoint keys not in "
+                    f"model (incl. {missing[:3]}); LoRA target mismatch?"
+                )
+            if shape_bad:
+                raise RuntimeError(f"resume failed: {len(shape_bad)} shape mismatches (incl. {shape_bad[:2]})")
+            target.load_state_dict(loaded, strict=False)
+            print(f"[stage-a] resumed LoRA weights from {ts} ({len(loaded)} tensors)")
         os_ = run_dir / "optim_state.pt"
         if os_.exists():
             optimizer.load_state_dict(torch.load(os_, map_location="cpu"))
@@ -339,7 +369,12 @@ def train_stage_a(
 
     # --- loop ---
     optimizer.zero_grad()
+    t_session_start = time.perf_counter()
     while step < total_steps:
+        if max_runtime_s is not None and (time.perf_counter() - t_session_start) >= max_runtime_s:
+            print(f"[stage-a] session time budget reached ({max_runtime_s:.0f}s); saving final checkpoint")
+            save_checkpoint(final=True)
+            break
         batch = next(train_iter)
         input_ids = batch["input_ids"].to(device)
         depth = 1 if scale == "base" else sample_depth(depth_rng)
