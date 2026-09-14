@@ -30,7 +30,7 @@ def _arc_format(question: str, choices: list[str]) -> tuple[str, list[str]]:
 
 def _arca_task(split: str, limit: int | None = None):
     def load():
-        ds = load_dataset("allenai/arc-easy", split=split)
+        ds = load_dataset("ai2_arc", "ARC-Easy", split=split)
         items = []
         for row in ds:
             choices = list(row["choices"]["text"])
@@ -45,7 +45,7 @@ def _arca_task(split: str, limit: int | None = None):
 
 def _arc_choice_task(split: str, limit: int | None = None):
     def load():
-        ds = load_dataset("allenai/arc-challenge", split=split)
+        ds = load_dataset("ai2_arc", "ARC-Challenge", split=split)
         items = []
         for row in ds:
             choices = list(row["choices"]["text"])
@@ -102,7 +102,7 @@ def _winogrande(split: str, limit: int | None = None, config: str = "winogrande_
 
 def _boolq(split: str, limit: int | None = None):
     def load():
-        ds = load_dataset("google/boolq", split=split)
+        ds = load_dataset("google/boolq", split=split, trust_remote_code=True)
         items = []
         for row in ds:
             ctx = f"Passage: {_clean(row['passage'])}\nQuestion: {_clean(row['question'])}\nAnswer:"

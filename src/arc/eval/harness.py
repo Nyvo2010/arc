@@ -127,10 +127,34 @@ class EvalModel:
 
 
 def _tokenize(tokenizer, text: str) -> Tensor:
-    return torch.tensor(
-        tokenizer(text, add_special_tokens=False, return_tensors="pt").input_ids[0].tolist(),
-        dtype=torch.long,
-    )
+    out = tokenizer(text, add_special_tokens=False, return_tensors="pt")
+    if isinstance(out, dict):
+        ids = out["input_ids"]
+    else:
+        ids = out.input_ids
+    return torch.tensor(ids[0].tolist() if ids.ndim else [ids], dtype=torch.long)
+
+
+class _TinyTokenizer:
+    """Char-level tokenizer for the tiny test model (vocab 128). Only for
+    local smoke tests; Kaggle runs use the real JetMoE tokenizer."""
+
+    def __init__(self):
+        self.pad_token = None
+        self.eos_token = None
+        self.vocab_size = 128
+
+    def __call__(self, text, add_special_tokens=False, return_tensors="pt"):
+        ids = [ord(c) % 128 for c in str(text)]
+        return {"input_ids": torch.tensor([ids], dtype=torch.long)}
+
+
+def _get_tokenizer(base_path: str):
+    if base_path == "tiny":
+        return _TinyTokenizer()
+    from transformers import AutoTokenizer
+
+    return AutoTokenizer.from_pretrained(base_path, trust_remote_code=True, use_fast=True)
 
 
 def chunk_text(tokenizer, text: str, max_len: int = 512) -> list[Tensor]:
@@ -158,12 +182,8 @@ def evaluate_model(
     device_map: str = "auto",
 ) -> dict[str, dict]:
     """Run the task suite for one model. Returns {task: metrics}."""
-    from transformers import AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        base_path, trust_remote_code=True, use_fast=True
-    )
-    if tokenizer.pad_token is None:
+    tokenizer = _get_tokenizer(base_path)
+    if base_path != "tiny" and tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     model = EvalModel(key=key, base_path=base_path, adapter_dir=adapter_dir,

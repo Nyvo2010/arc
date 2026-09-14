@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from arc.eval.harness import evaluate_model, write_results_csv
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from arc.eval.harness import evaluate_model, write_results_csv  # noqa: E402
 
 
 def _parse_kv(s: str) -> dict[str, str]:
