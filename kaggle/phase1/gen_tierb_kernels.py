@@ -107,6 +107,11 @@ else:
     r = subprocess.run(cmd, shell=True)
     print("push exit:", r.returncode)"""),
         src_cell(f"!ls -R {run_dir} 2>/dev/null | head -40"),
+        src_cell("""import shutil, os
+# Keep captured output small: drop the base weights so self-mount staging for
+# the next session is fast. Checkpoints (resume state) stay in the output.
+shutil.rmtree("/kaggle/working/jetmoe-8b", ignore_errors=True)
+print("removed /kaggle/working/jetmoe-8b from captured output")"""),
     ]
     return {
         "cells": cells,
