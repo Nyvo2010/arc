@@ -34,7 +34,7 @@ RUN_ID = "phase1-tier-b-r1"
 EXPECT_RESUME = {
     "model_adaptive": True,
     "block_adaptive": True,
-    "layer_adaptive": False,
+    "layer_adaptive": True,
 }
 
 
