@@ -10,6 +10,9 @@ class RecurrenceState:
     compute_used: float = 0.0
     executions: int = 0
     unit_loop_counts: dict[int, int] = field(default_factory=dict)
+    decide_scores: dict[int, float] = field(default_factory=dict)
+    decide_probs: dict[int, float] = field(default_factory=dict)
+    current_unit: int = 0
 
     def record_execution(self, unit_index: int) -> None:
         self.executions += 1
@@ -26,5 +29,6 @@ class RecurrenceState:
             "compute_used": self.compute_used,
             "executions": self.executions,
             "unit_loop_counts": dict(self.unit_loop_counts),
+            "decide_probs": dict(self.decide_probs),
         }
 

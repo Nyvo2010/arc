@@ -48,6 +48,7 @@ class AdaptiveRecurrentLM(torch.nn.Module):
 
         with torch.no_grad():
             for unit_index in range(self.num_units()):
+                state.current_unit = unit_index
                 logits_prev = None
                 hidden_prev = None
                 rec_count = 0

@@ -47,6 +47,11 @@ def main() -> None:
     ap.add_argument("--limits", default="",
                     help="comma-separated task=limit overrides")
     ap.add_argument("--depth", type=int, default=1)
+    ap.add_argument("--max_loops", type=int, default=4,
+                    help="controller max_loops cap for the budgeted path")
+    ap.add_argument("--budgeted", action="store_true",
+                    help="use the REAL adaptive halt-head path (Policy-T decide()) "
+                         "instead of fixed-depth random recurrence")
     ap.add_argument("--out", default="benchmarks/results.csv")
     ap.add_argument("--device_map", default="auto")
     ap.add_argument("--max_len", type=int, default=512)
@@ -61,7 +66,8 @@ def main() -> None:
     meta = {}
     for key in models:
         adapter_dir = adapters.get(key)
-        print(f"[bench] evaluating {key} depth={args.depth} adapter={adapter_dir or 'none'}")
+        print(f"[bench] evaluating {key} depth={args.depth} "
+              f"budgeted={args.budgeted} max_loops={args.max_loops} adapter={adapter_dir or 'none'}")
         res = evaluate_model(
             key=key,
             base_path=args.base,
@@ -71,10 +77,13 @@ def main() -> None:
             max_len=args.max_len,
             depth=args.depth,
             device_map=args.device_map,
+            budgeted=args.budgeted,
+            max_loops=args.max_loops,
         )
         results[key] = res
         meta[key] = {
             "variant": key, "depth": args.depth,
+            "budgeted": str(args.budgeted), "max_loops": str(args.max_loops),
             "adapter": adapter_dir or "none",
             "source": args.base,
         }

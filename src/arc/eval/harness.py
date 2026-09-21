@@ -25,6 +25,34 @@ from arc.models.registry import MODEL_VARIANTS, create_adapter
 from arc.training.random_recurrence import random_recurrence_forward
 
 
+class _ModelState:
+    """Accumulates compute/loop stats across scored items."""
+
+    def __init__(self) -> None:
+        self.items: int = 0
+        self.executions: int = 0
+        self.compute_used: float = 0.0
+        self.decide_probs: float = 0.0
+        self.decide_calls: int = 0
+
+    def add(self, state: Any, n_items: int = 1) -> None:
+        self.items += n_items
+        self.executions += int(getattr(state, "executions", 0))
+        self.compute_used += float(getattr(state, "compute_used", 0.0))
+        probs = getattr(state, "decide_probs", {})
+        self.decide_probs += sum(probs.values()) if probs else 0.0
+        self.decide_calls += len(probs) if probs else 0
+
+    def stats(self) -> dict:
+        n = max(1, self.items)
+        return {
+            "avg_executions_per_item": round(self.executions / n, 3),
+            "avg_flops_per_item": round(self.compute_used / n, 1),
+            "total_flops": round(self.compute_used, 1),
+            "avg_decide_mean_p": round(self.decide_probs / max(1, self.decide_calls), 4),
+        }
+
+
 class EvalModel:
     """Thin wrapper: base or adapter-equipped model evaluated at fixed depth.
 
@@ -33,13 +61,16 @@ class EvalModel:
     """
 
     def __init__(self, key: str, base_path: str, adapter_dir: str | None = None,
-                 depth: int = 1, device_map: str = "auto"):
+                 depth: int = 1, device_map: str = "auto", budgeted: bool = False,
+                 max_loops: int = 4):
         if key not in MODEL_VARIANTS:
             raise ValueError(f"unknown model key {key}")
         scale = MODEL_VARIANTS[key]["scale"]
         self.key = key
         self.scale = scale
         self.depth = int(depth)
+        self.budgeted = budgeted
+        self.max_loops = max_loops
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         if key == "base" or not MODEL_VARIANTS[key].get("adaptive"):
             depth = 1  # base model ignores depth
@@ -55,9 +86,26 @@ class EvalModel:
             self.adapter.head = self.adapter.hf_model.lm_head
             self.adapter.hf_model.eval()
 
+        # Real adaptive path (Policy-T): build the ARC controller LM.
+        if self.budgeted:
+            from arc.recurrence.builder import build_model
+
+            self.arc_model = build_model(scale, self.adapter, max_loops=max_loops)
+        self._last_state: Any = None
+        self._chunk_states: list = []
+
+    def _forward_adaptive(self, ids: Tensor):
+        """Return (logits, state) through the controller path (budgeted)."""
+        res = self.arc_model(ids)
+        return res.logits, res.state
+
     @torch.no_grad()
-    def forward_logits(self, input_ids: Tensor) -> Tensor:
+    def forward_logits(self, input_ids: Tensor):
         ids = input_ids.to(self.device)
+        if self.budgeted:
+            logits, state = self._forward_adaptive(ids)
+            self._last_state = state
+            return logits
         if self.eff_depth == 1 or self.scale == "base":
             h, logits = self.adapter.forward_native(ids)
             return logits
@@ -111,11 +159,13 @@ class EvalModel:
 
     @torch.no_grad()
     def wikitext_nll(self, chunks: list[Tensor]) -> tuple[float, int]:
-        """Mean NLL over the given token chunks."""
+        """Mean NLL over the given token chunks. Accumulates budgeted state per chunk."""
         tot = 0.0
         cnt = 0
         for ids in chunks:
             logits = self.forward_logits(ids)
+            if self.budgeted:
+                self._chunk_states.append(self._last_state)
             if logits.device != self.device:
                 logits = logits.to(self.device)
             logp = nn.functional.log_softmax(logits.float(), dim=-1)
@@ -180,6 +230,8 @@ def evaluate_model(
     batch_choices: bool = True,
     depth: int = 1,
     device_map: str = "auto",
+    budgeted: bool = False,
+    max_loops: int = 4,
 ) -> dict[str, dict]:
     """Run the task suite for one model. Returns {task: metrics}."""
     tokenizer = _get_tokenizer(base_path)
@@ -187,7 +239,9 @@ def evaluate_model(
         tokenizer.pad_token = tokenizer.eos_token
 
     model = EvalModel(key=key, base_path=base_path, adapter_dir=adapter_dir,
-                      depth=depth, device_map=device_map)
+                      depth=depth, device_map=device_map, budgeted=budgeted,
+                      max_loops=max_loops)
+    mstate = _ModelState()
     out = {}
     for task in tasks:
         spec = TASKS[task]
@@ -210,12 +264,19 @@ def evaluate_model(
                 "ppl": math.exp(tot_nll) if tot_nll < 20 else float("inf"),
                 "mean_nll": round(tot_nll, 4), "elapsed_s": round(time.perf_counter() - t0, 1),
             }
+            if budgeted:
+                for st in model._chunk_states:
+                    mstate.add(st)
+                out[task].update(mstate.stats())
+            model._chunk_states = []
         else:
             n_correct, n_correct_norm, n_tot = 0, 0, 0
             for stem, conts, label in items:
                 ctx_ids = _tokenize(tokenizer, stem)
                 cont_ids = [_tokenize(tokenizer, c) for c in conts]
                 scores = model.score_choices([ctx_ids] * len(cont_ids), cont_ids)
+                if budgeted and getattr(model, "_last_state", None) is not None:
+                    mstate.add(model._last_state)
                 if batch_choices:
                     pass
                 pred = max(range(len(scores)), key=lambda i: scores[i] if scores[i] != float("-inf") else float("-inf"))
@@ -237,6 +298,8 @@ def evaluate_model(
                 "acc_norm": round(n_correct_norm / max(1, n_tot), 4),
                 "elapsed_s": round(time.perf_counter() - t0, 1),
             }
+            if budgeted:
+                out[task].update(mstate.stats())
     return out
 
 

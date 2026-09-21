@@ -47,23 +47,57 @@ class RecurrenceController:
 
 
 class ThresholdController(RecurrenceController):
-    """Rule-based controller using distribution and hidden-state stability."""
+    """Formula-based HALT controller (Policy-T, no learned parameters).
+
+    Computes one ``converged_score`` from all stability signals, maps it to a
+    halt probability via a sigmoid, and stops when ``p_halt`` clears a
+    threshold. Default is STOP: a loop only runs if the sequence is clearly
+    still moving (see the diminishing-returns gate). ``max_loops`` remains a
+    hard safety cap, not the operative bound.
+
+    References:
+      - js / hidden change are normalized against ``ref_js`` / ``ref_hidden``
+      - entropy is normalized by ``log(vocab)``
+      - confidence trend by ``ref_entropy_delta`` (nats per loop)
+    """
 
     def __init__(
         self,
-        max_loops: int = 8,
+        max_loops: int = 4,
         compute_budget: float | None = None,
         halt_head: Any | None = None,
-        js_threshold: float = 0.01,
-        hidden_change_threshold: float = 0.01,
-        top1_stability_threshold: float = 0.95,
-        entropy_delta_threshold: float = -0.001,
+        ref_js: float = 0.05,
+        ref_hidden: float = 0.1,
+        ref_entropy_delta: float = 0.1,
+        k: float = 12.0,
+        bias: float = 0.6,
+        halt_threshold: float = 0.45,
+        min_gain: float = 0.02,
+        w_js: float = 0.25,
+        w_hidden: float = 0.25,
+        w_top1: float = 0.20,
+        w_entropy: float = 0.15,
+        w_conf: float = 0.15,
     ):
         super().__init__(max_loops, compute_budget, halt_head)
-        self.js_threshold = js_threshold
-        self.hidden_change_threshold = hidden_change_threshold
-        self.top1_stability_threshold = top1_stability_threshold
-        self.entropy_delta_threshold = entropy_delta_threshold
+        self.ref_js = ref_js
+        self.ref_hidden = ref_hidden
+        self.ref_entropy_delta = ref_entropy_delta
+        self.k = k
+        self.bias = bias
+        self.halt_threshold = halt_threshold
+        self.min_gain = min_gain
+        self.w_js = w_js
+        self.w_hidden = w_hidden
+        self.w_top1 = w_top1
+        self.w_entropy = w_entropy
+        self.w_conf = w_conf
+        self._vocab_size: int | None = None
+
+    def _log_vocab(self, logits: Tensor) -> float:
+        if self._vocab_size is None:
+            self._vocab_size = int(logits.shape[-1])
+        return float(math.log(max(2, self._vocab_size)))
 
     @staticmethod
     def _softmax(logits: Tensor) -> Tensor:
@@ -101,6 +135,7 @@ class ThresholdController(RecurrenceController):
         recurrence_count: int,
         compute_used: float,
     ) -> ControllerFeatures:
+        self._vocab_size = int(logits_cur.shape[-1])
         p_cur = self._softmax(logits_cur)
         entropy = self._entropy(p_cur)
 
@@ -128,46 +163,50 @@ class ThresholdController(RecurrenceController):
             compute_budget=self.compute_budget,
         )
 
+    def converged_score(self, features: ControllerFeatures, logits: Tensor | None = None) -> float:
+        """Instability vs convergence in [0,1]; 1 == fully settled, 0 == moving."""
+        log_v = self._log_vocab(logits) if logits is not None else 1.0
+        js_n = min(features.js_divergence / max(self.ref_js, 1e-9), 1.0)
+        hidden_n = min(features.hidden_cosine_change / max(self.ref_hidden, 1e-9), 1.0)
+        entropy_n = min(features.entropy / max(log_v, 1e-9), 1.0)
+        conf_n = min(max(-features.entropy_delta / max(self.ref_entropy_delta, 1e-9), 0.0), 1.0)
+
+        score = (
+            self.w_js * (1.0 - js_n)
+            + self.w_hidden * (1.0 - hidden_n)
+            + self.w_top1 * features.top1_stability
+            + self.w_entropy * (1.0 - entropy_n)
+            + self.w_conf * conf_n
+        )
+        return float(score)
+
+    @staticmethod
+    def _p_halt(score: float, k: float, bias: float) -> float:
+        return 1.0 / (1.0 + math.exp(-k * (score - bias)))
+
     def decide(self, features: ControllerFeatures, state: Any) -> bool:
+        # hard safety caps
         if features.recurrence_count >= self.max_loops:
             return False
         if self.compute_budget is not None and features.compute_used >= self.compute_budget:
             return False
 
-        # Learned HALT head integration: use probability of CONTINUE if head is provided
-        halt_prob = None
-        if self.halt_head is not None:
-            try:
-                # HALT head expects raw tensors; build minimal feature tensor from ControllerFeatures
-                # Create dummy inputs for the head (features are already computed)
-                # We'll use the controller's current thresholds as fallback
-                # For safety, we map features to a dummy probability via sigmoid of a simple score
-                # If the head provides a proper forward, it would return continue probability
-                # For now, we use a heuristic: high stability -> lower continue prob
-                score = (
-                    features.js_divergence / max(self.js_threshold, 1e-9) +
-                    features.hidden_cosine_change / max(self.hidden_change_threshold, 1e-9) +
-                    (1.0 - features.top1_stability) / max(1.0 - self.top1_stability_threshold, 1e-9)
-                )
-                # sigmoid scaling to [0,1]
-                import math
-                halt_prob = 1.0 / (1.0 + math.exp(-float(score)))
-            except Exception:
-                # If HALT head fails, fallback to deterministic rule
-                halt_prob = None
+        score = self.converged_score(features)
 
-        # Deterministic rule-based signal
-        continue_signal = (
-            features.js_divergence > self.js_threshold
-            or features.hidden_cosine_change > self.hidden_change_threshold
-            or features.top1_stability < self.top1_stability_threshold
-        )
-        if features.entropy_delta < self.entropy_delta_threshold:
-            continue_signal = True
+        # Diminishing-returns gate: only keep looping while the sequence keeps
+        # adding NEW movement each pass. Otherwise bias hard toward stopping.
+        key = getattr(state, "current_unit", 0)
+        prev: dict[int, float] = getattr(state, "decide_scores", {})
+        pscore = prev.get(key)
+        prev[key] = score
+        if features.recurrence_count >= 2 and pscore is not None:
+            if score - pscore < self.min_gain:
+                return False
+        if self.max_loops is not None and features.recurrence_count >= self.max_loops:
+            return False
 
-        # Blend with learned probability if available
-        if halt_prob is not None:
-            # Treat halt_prob as continue probability
-            continue_signal = continue_signal or (halt_prob > 0.5)
-
-        return bool(continue_signal)
+        p_halt = self._p_halt(score, self.k, self.bias)
+        if getattr(state, "decide_probs", None) is not None:
+            state.decide_probs[key] = state.decide_probs.get(key, 0.0) + p_halt
+        halt = p_halt >= self.halt_threshold
+        return not halt
