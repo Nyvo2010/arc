@@ -67,9 +67,9 @@ except Exception as e:
         src_cell("""!rm -rf /kaggle/working/arc && git clone --branch stage-a-cpt https://github.com/Nyvo2010/arc.git /kaggle/working/arc
 !pip install -q -r /kaggle/working/arc/requirements-kaggle.txt huggingface_hub"""),
         src_cell(f"""import glob, os, shutil
-cand = glob.glob("/kaggle/input/*/jetmoe-8b/config.json")
-if cand:
-    base_src = os.path.dirname(os.path.dirname(cand[0]))
+cands = sorted(glob.glob("/kaggle/input/*/jetmoe-8b/config.json"))
+if cands:
+    base_src = os.path.dirname(cands[0])
     print("reusing base weights from input:", base_src)
     shutil.copytree(base_src, "/kaggle/working/jetmoe-8b", dirs_exist_ok=True)
 else:

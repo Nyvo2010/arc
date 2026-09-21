@@ -64,7 +64,44 @@ for variant, d in sorted(adapter_dirs.items()):
     st = json.load(open(rd / "train_state.json")) if (rd / "train_state.json").exists() else {{}}
     print(variant, "| best.best_val_loss:", best.get("best_val_loss"),
           "| tokens:", st.get("tokens_processed"), "| step:", st.get("step"))"""),
-        src_cell(f"""import json
+        src_cell(f"""import json, os, sys, torch
+# SMOKE: reproducibility of the Hub-published repos. Load ONE variant through
+# AutoModelForCausalLM.from_pretrained(repo, trust_remote_code=True) and verify
+# its logits match the local JIT build with the same base + adapter weights.
+adapter_dirs = json.load(open("/kaggle/working/adapters.json"))
+variant = "block_adaptive"
+
+# --- local reference build (training-time code, same inputs) ---
+sys.path.insert(0, "/kaggle/working/arc/src")
+from arc.recurrence.builder import build_model
+from arc.models.registry import create_adapter
+from peft import PeftModel
+
+adap = create_adapter("/kaggle/working/jetmoe-8b", device_map="auto")
+adap.hf_model = PeftModel.from_pretrained(adap.hf_model, adapter_dirs[variant])
+adap.net = adap.hf_model.model
+adap.head = adap.hf_model.lm_head
+adap.hf_model.eval()
+local = build_model("block", adap, max_loops=4).eval()
+
+repo = "Nyvo/arc-jetmoe-block-adaptive"
+from transformers import AutoModelForCausalLM
+hub = AutoModelForCausalLM.from_pretrained(repo, trust_remote_code=True,
+                                           token=os.environ.get("HF_TOKEN") or True)
+hub.eval()
+
+ids = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]])
+with torch.no_grad():
+    ids = ids.to("cuda" if torch.cuda.is_available() else "cpu")
+    l_out = local(ids)
+    h_out = hub(ids)
+l_logits = l_out.logits.float()
+h_logits = h_out.logits.float()
+diff = (l_logits - h_logits).abs().max().item()
+print(f"[smoke] {{variant}} | local-hub logits max-abs-diff = {{diff:.2e}}")
+assert diff < 1e-3, f"Hub repo and local build disagree (diff={{diff}})"
+print("[smoke] OK: Hub repo reproduces the trained behavior")"""),
+        src_cell(f"""import json, os
 adapter_dirs = json.load(open("/kaggle/working/adapters.json"))
 adap = ",".join(f"{{k}}={{v}}" for k, v in sorted(adapter_dirs.items()))
 print(adap)
