@@ -31,13 +31,15 @@ class _ModelState:
     def __init__(self) -> None:
         self.items: int = 0
         self.executions: int = 0
+        self.tokens: int = 0
         self.compute_used: float = 0.0
         self.decide_probs: float = 0.0
         self.decide_calls: int = 0
 
-    def add(self, state: Any, n_items: int = 1) -> None:
+    def add(self, state: Any, n_items: int = 1, tokens: int = 0) -> None:
         self.items += n_items
         self.executions += int(getattr(state, "executions", 0))
+        self.tokens += tokens
         self.compute_used += float(getattr(state, "compute_used", 0.0))
         probs = getattr(state, "decide_probs", {})
         self.decide_probs += sum(probs.values()) if probs else 0.0
@@ -46,7 +48,9 @@ class _ModelState:
     def stats(self) -> dict:
         n = max(1, self.items)
         return {
-            "avg_executions_per_item": round(self.executions / n, 3),
+            "avg_loops_per_item": round(self.executions / n, 3),
+            "avg_tokens_per_item": round(self.tokens / n, 1),
+            "total_executions": self.executions,
             "avg_flops_per_item": round(self.compute_used / n, 1),
             "total_flops": round(self.compute_used, 1),
             "avg_decide_mean_p": round(self.decide_probs / max(1, self.decide_calls), 4),
@@ -93,11 +97,16 @@ class EvalModel:
             self.arc_model = build_model(scale, self.adapter, max_loops=max_loops)
         self._last_state: Any = None
         self._chunk_states: list = []
+        self._last_tokens: int = 0
+        self._chunk_tokens: int = 0
 
     def _forward_adaptive(self, ids: Tensor):
         """Return (logits, state) through the controller path (budgeted)."""
         res = self.arc_model(ids)
-        return res.logits, res.state
+        st = res.state
+        # tokens processed = executions(loops total) x batch x seq_len
+        self._last_tokens = int(getattr(st, "executions", 0)) * int(ids.shape[0]) * int(ids.shape[1])
+        return res.logits, st
 
     @torch.no_grad()
     def forward_logits(self, input_ids: Tensor):
@@ -166,6 +175,7 @@ class EvalModel:
             logits = self.forward_logits(ids)
             if self.budgeted:
                 self._chunk_states.append(self._last_state)
+                self._chunk_tokens += self._last_tokens
             if logits.device != self.device:
                 logits = logits.to(self.device)
             logp = nn.functional.log_softmax(logits.float(), dim=-1)
@@ -208,14 +218,14 @@ def _get_tokenizer(base_path: str):
 
 
 def chunk_text(tokenizer, text: str, max_len: int = 512) -> list[Tensor]:
-    """Tokenize text and split into <=max_len non-overlapping chunks."""
+    """Tokenize text and split into <=max_len non-overlapping [1, n] chunks."""
     ids = _tokenize(tokenizer, text)
     n = int(len(ids))
     chunks = []
     for s in range(0, n, max_len):
         e = min(s + max_len, n)
         if e - s > 0:
-            chunks.append(ids[s:e])
+            chunks.append(ids[s:e].unsqueeze(0))
     return chunks
 
 
@@ -266,9 +276,10 @@ def evaluate_model(
             }
             if budgeted:
                 for st in model._chunk_states:
-                    mstate.add(st)
+                    mstate.add(st, tokens=model._chunk_tokens)
                 out[task].update(mstate.stats())
             model._chunk_states = []
+            model._chunk_tokens = 0
         else:
             n_correct, n_correct_norm, n_tot = 0, 0, 0
             for stem, conts, label in items:
@@ -276,7 +287,7 @@ def evaluate_model(
                 cont_ids = [_tokenize(tokenizer, c) for c in conts]
                 scores = model.score_choices([ctx_ids] * len(cont_ids), cont_ids)
                 if budgeted and getattr(model, "_last_state", None) is not None:
-                    mstate.add(model._last_state)
+                    mstate.add(model._last_state, tokens=model._last_tokens)
                 if batch_choices:
                     pass
                 pred = max(range(len(scores)), key=lambda i: scores[i] if scores[i] != float("-inf") else float("-inf"))

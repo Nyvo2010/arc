@@ -68,27 +68,31 @@ for variant, d in sorted(adapter_dirs.items()):
 adapter_dirs = json.load(open("/kaggle/working/adapters.json"))
 adap = ",".join(f"{{k}}={{v}}" for k, v in sorted(adapter_dirs.items()))
 print(adap)
+# PRIMARY RUN: real Policy-T halt head (budgeted) for base + all 3 variants.
 !cd /kaggle/working/arc && python scripts/run_benchmarks.py \\
   --base /kaggle/working/jetmoe-8b \\
   --model base,model_adaptive,block_adaptive,layer_adaptive \\
   --adapters {{adap}} \\
-  --depth 1 \\
+  --budgeted \\
+  --max_loops 4 \\
   --limits {MAIN_LIMITS} \\
-  --out /kaggle/working/benchmarks-tierb-r1.csv"""),
+  --out /kaggle/working/benchmarks-tierb-budgeted.csv"""),
         src_cell(f"""import json, subprocess, sys
 adapter_dirs = json.load(open("/kaggle/working/adapters.json"))
 adap = ",".join(f"{{k}}={{v}}" for k, v in sorted(adapter_dirs.items()))
-for depth in (2, 3, 4):
-    out = f"/kaggle/working/benchmarks-tierb-depth{{depth}}.csv"
+# RECURRENCE CAP SENSITIVITY: budgeted eval at tighter caps (compute frontier).
+for ml in (2, 3):
+    out = f"/kaggle/working/benchmarks-tierb-loops{{ml}}.csv"
     cmd = [sys.executable, "scripts/run_benchmarks.py",
            "--base", "/kaggle/working/jetmoe-8b",
            "--model", "model_adaptive,block_adaptive,layer_adaptive",
            "--adapters", adap,
-           "--depth", str(depth),
+           "--budgeted",
+           "--max_loops", str(ml),
            "--tasks", "{SWEEP_TASKS}",
            "--limits", "{SWEEP_LIMITS}",
            "--out", out]
-    print(">>> depth", depth)
+    print(">>> max_loops", ml)
     subprocess.run(cmd, cwd="/kaggle/working/arc", check=True)"""),
         src_cell("""import csv, glob, math, os, shutil
 from pathlib import Path
@@ -101,18 +105,22 @@ rows = []
 for c in csvs:
     rows.extend(csv.DictReader(open(c)))
 mcq = ["arc_easy", "arc_challenge", "hellaswag", "piqa", "winogrande", "boolq", "sciq"]
-def g(key, task, depth):
+def g(key, task, budgeted, loops):
     for r in rows:
-        if r["model"] == key and r["task"] == task and int(r.get("depth", 1) or 1) == int(depth or 1):
+        if (r["model"] == key and r["task"] == task
+                and str(r.get("budgeted", "False")) == str(budgeted)
+                and int(r.get("max_loops", 4) or 4) == int(loops or 4)):
             return r
     return None
 for key in ["base", "model_adaptive", "block_adaptive", "layer_adaptive"]:
     print("\\n===", key, "===")
     for task in mcq:
-        r = g(key, task, 1)
-        if r: print(f"  {{task:14s}} acc={{float(r['acc'])*100:5.1f}}  acc_norm={{float(r['acc_norm'])*100:5.1f}}")
-    r = g(key, "wikitext", 1)
-    if r: print(f"  wikitext      ppl={{float(r['ppl']):6.1f}}")"""),
+        r = g(key, task, True, 4)
+        if r:
+            print(f"  {{task:14s}} acc={{float(r['acc'])*100:5.1f}}  acc_norm={{float(r['acc_norm'])*100:5.1f}}  "
+                  f"loops={{r.get('avg_loops_per_item','-')}}  flops={{r.get('avg_flops_per_item','-')}}")
+    r = g(key, "wikitext", True, 4)
+    if r: print(f"  wikitext      ppl={{float(r['ppl']):6.1f}}  loops={{r.get('avg_loops_per_item','-')}}")"""),
         src_cell("""import json, os
 if os.environ.get("HF_TOKEN"):
     from huggingface_hub import HfApi
@@ -149,7 +157,7 @@ def build_metadata() -> dict:
         "machine_shape": "NvidiaTeslaT4",
         "competition_sources": [],
         "dataset_sources": [],
-        "kernel_sources": [f"niyuvo/arc-cpt-tier-b-{v}" for v in VARIANTS],
+        "kernel_sources": [f"niyuvo/arc-cpt-tier-b-{v.replace('_', '-')}" for v in VARIANTS],
         "model_sources": [],
     }
 
