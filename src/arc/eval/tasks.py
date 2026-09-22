@@ -60,7 +60,7 @@ def _arc_choice_task(split: str, limit: int | None = None):
 
 def _hellaswag(split: str, limit: int | None = None):
     def load():
-        ds = load_dataset("Rowan/hellaswag", split=split)
+        ds = load_dataset("Rowan/hellaswag", split=split, trust_remote_code=True)
         items = []
         for row in ds:
             ctx = _clean(row["ctx"])
@@ -73,7 +73,7 @@ def _hellaswag(split: str, limit: int | None = None):
 
 def _piqa(split: str, limit: int | None = None):
     def load():
-        ds = load_dataset("ybisk/piqa", split=split)
+        ds = load_dataset("ybisk/piqa", split=split, trust_remote_code=True)
         items = []
         for row in ds:
             ctx = f"Question: {_clean(row['goal'])}\nAnswer:"
@@ -86,7 +86,7 @@ def _piqa(split: str, limit: int | None = None):
 
 def _winogrande(split: str, limit: int | None = None, config: str = "winogrande_xl"):
     def load():
-        ds = load_dataset("allenai/winogrande", config, split=split)
+        ds = load_dataset("allenai/winogrande", config, trust_remote_code=True, split=split)
         items = []
         for row in ds:
             sent = _clean(row["sentence"])
@@ -116,7 +116,7 @@ def _boolq(split: str, limit: int | None = None):
 
 def _sciq(split: str, limit: int | None = None):
     def load():
-        ds = load_dataset("allenai/sciq", split=split)
+        ds = load_dataset("allenai/sciq", split=split, trust_remote_code=True)
         items = []
         for row in ds:
             ctx = f"Question: {_clean(row['question'])}\nAnswer:"
