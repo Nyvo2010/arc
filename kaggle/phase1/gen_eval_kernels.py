@@ -18,9 +18,10 @@ RUN_ID = "phase1-tier-b-r1"
 VARIANTS = ["model_adaptive", "block_adaptive", "layer_adaptive"]
 
 ADAPTER_DIR_GLOB = "/kaggle/input/*/checkpoints/phase1-tier-b/*/{variant}/adapters-best"
-MAIN_LIMITS = "wikitext=1000"
-SWEEP_LIMITS = ("arc_easy=150,arc_challenge=150,hellaswag=150,piqa=150,"
-                "winogrande=150,boolq=150,sciq=150")
+MAIN_LIMITS = ("arc_easy=40,arc_challenge=40,hellaswag=40,piqa=40,"
+               "winogrande=40,boolq=40,sciq=40,wikitext=200")
+SWEEP_LIMITS = ("arc_easy=30,arc_challenge=30,hellaswag=30,piqa=30,"
+                "winogrande=30,boolq=30,sciq=30")
 SWEEP_TASKS = "arc_easy,arc_challenge,hellaswag,piqa,winogrande,boolq,sciq"
 
 
