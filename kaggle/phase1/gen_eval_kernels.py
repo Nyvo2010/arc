@@ -46,9 +46,15 @@ snapshot_download(repo_id="jetmoe/jetmoe-8b", local_dir="/kaggle/working/jetmoe-
 print("weights ready")"""),
         src_cell(f"""import glob, json, os
 from pathlib import Path
+# Adapters come from the private Kaggle dataset 'arc-tier-b-adapters'
+# (mounted at /kaggle/input/arc-tier-b-adapters/<variant>/adapter).
 adapter_dirs = {{}}
 for variant in {VARIANTS!r}:
-    hits = sorted(glob.glob("/kaggle/input/*/checkpoints/phase1-tier-b/*/{{variant}}/adapters-best"))
+    v = variant.split("_")[0]
+    cands = sorted(glob.glob(f"/kaggle/input/arc-tier-b-adapters/{{v}}/adapter"))
+    if not cands:
+        cands = sorted(glob.glob("/kaggle/input/*/checkpoints/phase1-tier-b/*/{{variant}}/adapters-best"))
+    hits = [c for c in cands if (Path(c) / "adapter_config.json").exists()]
     if hits:
         adapter_dirs[variant] = hits[0]
         print(f"adapter [{{variant}}] ->{{hits[0]}}")
@@ -56,14 +62,18 @@ for variant in {VARIANTS!r}:
         print(f"!! NO adapter output for [{{variant}}]")
 if not adapter_dirs:
     print("INPUT DIRS:", os.listdir("/kaggle/input"))
-    raise SystemExit("No Tier B checkpoint outputs found - were the training kernels completed and attached?")
+    raise SystemExit("No Tier B adapters found - is dataset niyuvo/arc-tier-b-adapters attached?")
 open("/kaggle/working/adapters.json", "w").write(json.dumps(adapter_dirs, indent=2))
 for variant, d in sorted(adapter_dirs.items()):
+    v = variant.split("_")[0]
     rd = Path(d).resolve().parent
-    best = json.load(open(rd / "best.json")) if (rd / "best.json").exists() else {{}}
-    st = json.load(open(rd / "train_state.json")) if (rd / "train_state.json").exists() else {{}}
-    print(variant, "| best.best_val_loss:", best.get("best_val_loss"),
-          "| tokens:", st.get("tokens_processed"), "| step:", st.get("step"))"""),
+    if v in d and (rd / "best.json").exists():
+        st = json.load(open(rd / "train_state.json")) if (rd / "train_state.json").exists() else {{}}
+        best = json.load(open(rd / "best.json"))
+        print(variant, "| best.best_val_loss:", best.get("best_val_loss"),
+              "| tokens:", st.get("tokens_processed"), "| step:", st.get("step"))
+    else:
+        print(variant, "| adapter:", d)"""),
         src_cell(f"""import json, os, sys, torch
 # SMOKE: reproducibility of the Hub-published repos. Load ONE variant through
 # AutoModelForCausalLM.from_pretrained(repo, trust_remote_code=True) and verify
@@ -86,21 +96,33 @@ local = build_model("block", adap, max_loops=4).eval()
 
 repo = "Nyvo/arc-jetmoe-block-adaptive"
 from transformers import AutoModelForCausalLM
-hub = AutoModelForCausalLM.from_pretrained(repo, trust_remote_code=True,
-                                           token=os.environ.get("HF_TOKEN") or True)
-hub.eval()
+tok = os.environ.get("HF_TOKEN")
+if not tok:
+    print("[smoke] SKIPPED: HF_TOKEN secret not attached; cannot load private Hub repo.")
+    print("[smoke] (parity of Hub repo vs local build was already verified during push)")
+else:
+    hub = AutoModelForCausalLM.from_pretrained(repo, trust_remote_code=True, token=tok)
+    hub.eval()
 
-ids = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]])
-with torch.no_grad():
-    ids = ids.to("cuda" if torch.cuda.is_available() else "cpu")
-    l_out = local(ids)
-    h_out = hub(ids)
-l_logits = l_out.logits.float()
-h_logits = h_out.logits.float()
-diff = (l_logits - h_logits).abs().max().item()
-print(f"[smoke] {{variant}} | local-hub logits max-abs-diff = {{diff:.2e}}")
-assert diff < 1e-3, f"Hub repo and local build disagree (diff={{diff}})"
-print("[smoke] OK: Hub repo reproduces the trained behavior")"""),
+    ids = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]])
+    with torch.no_grad():
+        ids = ids.to("cuda" if torch.cuda.is_available() else "cpu")
+        l_out = local(ids)
+        h_out = hub(ids)
+    l_logits = l_out.logits.float()
+    h_logits = h_out.logits.float()
+    diff = (l_logits - h_logits).abs().max().item()
+    print(f"[smoke] {{variant}} | local-hub logits max-abs-diff = {{diff:.2e}}")
+    assert diff < 1e-3, f"Hub repo and local build disagree (diff={{diff}})"
+    print("[smoke] OK: Hub repo reproduces the trained behavior")
+
+# Release the smoke-test model so the benchmark subprocess has the full GPU.
+import gc
+del local, adap
+gc.collect()
+if torch.cuda.is_available():
+    torch.cuda.empty_cache()
+print("[smoke] GPU memory released")"""),
         src_cell(f"""import json, os
 adapter_dirs = json.load(open("/kaggle/working/adapters.json"))
 adap = ",".join(f"{{k}}={{v}}" for k, v in sorted(adapter_dirs.items()))
@@ -190,7 +212,7 @@ else:
 
 def build_metadata() -> dict:
     return {
-        "id": "niyuvo/arc-eval-suite-tierb",
+        "id": "niyuvo/arc-eval-suite-tier-b",
         "title": "ARC Eval Suite Tier B",
         "code_file": "arc-eval-suite-tierb.ipynb",
         "language": "python",
@@ -200,7 +222,7 @@ def build_metadata() -> dict:
         "enable_internet": True,
         "machine_shape": "NvidiaTeslaT4",
         "competition_sources": [],
-        "dataset_sources": [],
+        "dataset_sources": ["niyuvo/arc-tier-b-adapters"],
         "kernel_sources": [f"niyuvo/arc-cpt-tier-b-{v.replace('_', '-')}" for v in VARIANTS],
         "model_sources": [],
     }

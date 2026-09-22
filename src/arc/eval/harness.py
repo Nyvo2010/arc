@@ -325,7 +325,20 @@ def evaluate_model(
             if budgeted:
                 mstate.add_time(out[task]["elapsed_s"])
                 out[task].update(mstate.stats())
+    _free_gpu(model)
     return out
+
+
+def _free_gpu(model) -> None:
+    """Release a model's GPU memory so the next variant can load on a single GPU."""
+    import gc
+
+    del model
+    gc.collect()
+    import torch
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def write_results_csv(results: dict, path: Path, meta: dict) -> None:
