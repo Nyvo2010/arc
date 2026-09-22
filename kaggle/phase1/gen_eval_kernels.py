@@ -88,9 +88,10 @@ from arc.models.registry import create_adapter
 from peft import PeftModel
 
 adap = create_adapter("/kaggle/working/jetmoe-8b", device_map="auto")
+net, head = adap.net, adap.head
 adap.hf_model = PeftModel.from_pretrained(adap.hf_model, adapter_dirs[variant])
-adap.net = adap.hf_model.model
-adap.head = adap.hf_model.lm_head
+adap.net = net
+adap.head = head
 adap.hf_model.eval()
 local = build_model("block", adap, max_loops=4).eval()
 

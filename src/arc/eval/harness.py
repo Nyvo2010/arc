@@ -94,12 +94,17 @@ class EvalModel:
 
         self.adapter = create_adapter(base_path, device_map=device_map)
         # Inject trained LoRA adapter weights into the (in-place) base model.
+        # Capture net/head from the raw JetMoeForCausalLM BEFORE wrapping in
+        # PeftModel (PeftModel.model proxies to the base CausalLM, not its
+        # transformer, so embed_tokens would be unreachable afterwards).
         if adapter_dir:
             from peft import PeftModel
 
+            net = self.adapter.net
+            head = self.adapter.head
             self.adapter.hf_model = PeftModel.from_pretrained(self.adapter.hf_model, adapter_dir)
-            self.adapter.net = self.adapter.hf_model.model
-            self.adapter.head = self.adapter.hf_model.lm_head
+            self.adapter.net = net
+            self.adapter.head = head
             self.adapter.hf_model.eval()
 
         # Real adaptive path (Policy-T): build the ARC controller LM.
