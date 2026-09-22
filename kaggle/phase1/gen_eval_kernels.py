@@ -119,7 +119,7 @@ else:
 
 # Release the smoke-test model so the benchmark subprocess has the full GPU.
 import gc
-del local, adap
+del local, adap, net, head
 gc.collect()
 if torch.cuda.is_available():
     torch.cuda.empty_cache()
