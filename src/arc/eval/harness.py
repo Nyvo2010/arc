@@ -26,7 +26,7 @@ from arc.training.random_recurrence import random_recurrence_forward
 
 
 class _ModelState:
-    """Accumulates compute/loop stats across scored items."""
+    """Accumulates compute/loop/time stats across scored items."""
 
     def __init__(self) -> None:
         self.items: int = 0
@@ -35,18 +35,25 @@ class _ModelState:
         self.compute_used: float = 0.0
         self.decide_probs: float = 0.0
         self.decide_calls: int = 0
+        self.wall_s: float = 0.0
+        self.forward_calls: int = 0
 
     def add(self, state: Any, n_items: int = 1, tokens: int = 0) -> None:
         self.items += n_items
         self.executions += int(getattr(state, "executions", 0))
         self.tokens += tokens
         self.compute_used += float(getattr(state, "compute_used", 0.0))
+        self.forward_calls += 1
         probs = getattr(state, "decide_probs", {})
         self.decide_probs += sum(probs.values()) if probs else 0.0
         self.decide_calls += len(probs) if probs else 0
 
+    def add_time(self, sec: float) -> None:
+        self.wall_s += max(0.0, sec)
+
     def stats(self) -> dict:
         n = max(1, self.items)
+        wall = max(self.wall_s, 1e-6)
         return {
             "avg_loops_per_item": round(self.executions / n, 3),
             "avg_tokens_per_item": round(self.tokens / n, 1),
@@ -54,6 +61,11 @@ class _ModelState:
             "avg_flops_per_item": round(self.compute_used / n, 1),
             "total_flops": round(self.compute_used, 1),
             "avg_decide_mean_p": round(self.decide_probs / max(1, self.decide_calls), 4),
+            "elapsed_s": round(self.wall_s, 1),
+            "items_per_s": round(self.items / wall, 2),
+            "tokens_per_s": round(self.tokens / wall, 1),
+            "flops_per_s": round(self.compute_used / wall, 1),
+            "decisions_per_s": round(self.decide_calls / wall, 1),
         }
 
 
@@ -251,9 +263,9 @@ def evaluate_model(
     model = EvalModel(key=key, base_path=base_path, adapter_dir=adapter_dir,
                       depth=depth, device_map=device_map, budgeted=budgeted,
                       max_loops=max_loops)
-    mstate = _ModelState()
     out = {}
     for task in tasks:
+        mstate = _ModelState()
         spec = TASKS[task]
         limit = (limits or {}).get(task, spec.get("default_limit"))
         if limits_prefix:
@@ -277,6 +289,7 @@ def evaluate_model(
             if budgeted:
                 for st in model._chunk_states:
                     mstate.add(st, tokens=model._chunk_tokens)
+                mstate.add_time(out[task]["elapsed_s"])
                 out[task].update(mstate.stats())
             model._chunk_states = []
             model._chunk_tokens = 0
@@ -310,6 +323,7 @@ def evaluate_model(
                 "elapsed_s": round(time.perf_counter() - t0, 1),
             }
             if budgeted:
+                mstate.add_time(out[task]["elapsed_s"])
                 out[task].update(mstate.stats())
     return out
 

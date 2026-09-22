@@ -155,9 +155,16 @@ for key in ["base", "model_adaptive", "block_adaptive", "layer_adaptive"]:
         r = g(key, task, True, 4)
         if r:
             print(f"  {{task:14s}} acc={{float(r['acc'])*100:5.1f}}  acc_norm={{float(r['acc_norm'])*100:5.1f}}  "
-                  f"loops={{r.get('avg_loops_per_item','-')}}  flops={{r.get('avg_flops_per_item','-')}}")
+                  f"loops={{r.get('avg_loops_per_item','-')}}  tok/it={{r.get('avg_tokens_per_item','-')}}  "
+                  f"tok/s={{r.get('tokens_per_s','-')}}  GFLOP/s={{r.get('flops_per_s','-')}}")
+            try:
+                print(f"       flops/it={{float(r.get('avg_flops_per_item',0))/1e12:6.2f}}T  "
+                      f"elapsed={{r.get('elapsed_s','-')}}s  items/s={{r.get('items_per_s','-')}}")
+            except (TypeError, ValueError):
+                pass
     r = g(key, "wikitext", True, 4)
-    if r: print(f"  wikitext      ppl={{float(r['ppl']):6.1f}}  loops={{r.get('avg_loops_per_item','-')}}")"""),
+    if r: print(f"  wikitext      ppl={{float(r['ppl']):6.1f}}  loops={{r.get('avg_loops_per_item','-')}}  "
+                f"tok/s={{r.get('tokens_per_s','-')}}  GFLOP/s={{r.get('flops_per_s','-')}}")"""),
         src_cell("""import json, os
 if os.environ.get("HF_TOKEN"):
     from huggingface_hub import HfApi
