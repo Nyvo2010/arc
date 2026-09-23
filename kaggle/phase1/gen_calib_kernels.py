@@ -22,13 +22,20 @@ LIMITS = "arc_easy=30,piqa=30"
 # (name, controller_kwargs) — tuned halting thumb: with defaults halting needs
 # score >= ~0.58 which is nearly unreachable, so bias/halt_threshold/min_gain
 # are lowered to make HALT fire on weakly-converged passes.
+#
+# Sweep 1 result: "early4" (bias .4/k10/thr .35/mg .06) drove nearly every item
+# to exactly 2 recursions and exactly reproduced the loops2 hard-cap accuracy
+# (model 56.7/80, block 76.7/86.7; layer 63.3/86.7 within noise of 73.3/90).
+# This refinement sweep brackets early4: re-runs it (determinism anchor), probes
+# slightly softer profiles that let a fraction of items reach recursion 3-4
+# (matching the train-time "a bit of 3-4"), and one maximal-2-pressure config.
 CONFIGS = [
-    ("default", {"bias": 0.6, "halt_threshold": 0.45, "min_gain": 0.02}),
-    ("early1", {"bias": 0.5, "halt_threshold": 0.40, "min_gain": 0.03}),
-    ("early2", {"bias": 0.45, "halt_threshold": 0.40, "min_gain": 0.04}),
-    ("early3", {"bias": 0.45, "k": 10, "halt_threshold": 0.35, "min_gain": 0.05}),
     ("early4", {"bias": 0.4, "k": 10, "halt_threshold": 0.35, "min_gain": 0.06}),
-    ("gain8", {"bias": 0.5, "k": 12, "halt_threshold": 0.45, "min_gain": 0.08}),
+    ("early4k8", {"bias": 0.4, "k": 8, "halt_threshold": 0.35, "min_gain": 0.06}),
+    ("early45", {"bias": 0.42, "k": 10, "halt_threshold": 0.36, "min_gain": 0.055}),
+    ("mixed", {"bias": 0.45, "k": 12, "halt_threshold": 0.38, "min_gain": 0.05}),
+    ("soft3", {"bias": 0.5, "k": 10, "halt_threshold": 0.42, "min_gain": 0.035}),
+    ("hard2b", {"bias": 0.38, "k": 12, "halt_threshold": 0.33, "min_gain": 0.07}),
     ("settle", {"bias": 0.55, "k": 12, "halt_threshold": 0.50, "min_gain": 0.02}),
 ]
 
