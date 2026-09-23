@@ -59,7 +59,8 @@ from pathlib import Path
 adapter_dirs = {{}}
 for variant in {VARIANTS!r}:
     v = variant.split("_")[0]
-    cands = sorted(glob.glob(f"/kaggle/input/arc-tier-b-adapters/{{v}}/adapter"))
+    cands = sorted(glob.glob(f"/kaggle/input/**/{{v}}/adapter", recursive=True))
+    cands += sorted(glob.glob("/kaggle/input/arc-tier-b-adapters/{{v}}/adapter"))
     hits = [c for c in cands if (Path(c) / "adapter_config.json").exists()]
     if hits:
         adapter_dirs[variant] = hits[0]
@@ -68,6 +69,9 @@ for variant in {VARIANTS!r}:
         print(f"!! NO adapter output for [{{variant}}]")
 if not adapter_dirs:
     print("INPUT DIRS:", os.listdir("/kaggle/input"))
+    for root in (Path("/kaggle/input")).rglob("adapter_config.json"):
+        print("found adapter_config:", root)
+    print("DATASETS DIR:", os.listdir("/kaggle/input/datasets") if os.path.isdir("/kaggle/input/datasets") else "n/a")
     raise SystemExit("No adapters found - is dataset niyuvo/arc-tier-b-adapters attached?")
 open("/kaggle/working/adapters.json", "w").write(json.dumps(adapter_dirs, indent=2))"""),
         src_cell(f"""import json, os, subprocess, sys
