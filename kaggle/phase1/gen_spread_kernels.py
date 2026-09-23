@@ -142,18 +142,18 @@ def tag_of(fn):
 for key in ["model_adaptive", "block_adaptive", "layer_adaptive"]:
     files = sorted(glob.glob(f"/kaggle/working/spread/spread-{key}-*.csv"))
     print("\\n===", key, "===")
-    print(f"{'config':11s} {'acc':>5s} {'loops':>5s} {'nan':>3s}  hist")
+    print(f"{'config':11s} {'acc':>5s} {'loops':>5s} {'GFLOP':>6s} {'acc/G':>5s} {'nan':>3s}  hist")
     rowsacc = {}
     for c in files:
         rows = list(csv.DictReader(open(c)))
         accs = [float(r["acc"]) * 100 for r in rows if r["task"] in mcq]
         avg = sum(accs) / len(accs)
+        gflop = sum(float(r.get("avg_flops_per_item", 0)) for r in rows if r["task"] in mcq) / len(accs) / 1e9
         r0 = rows[0]
         hist = r0.get("halt_hist", "")
-        print(f"{tag_of(c):11s} {avg:5.1f} {r0['avg_loops_per_item']:>5} {r0['nan_halts']:>3}  {hist}")
+        print(f"{tag_of(c):11s} {avg:5.1f} {r0['avg_loops_per_item']:>5.1f} {gflop:6.1f} {avg/gflop:5.2f} {r0['nan_halts']:>3}  {hist}")
         rowsacc[tag_of(c)] = avg
-    best = max(rowsacc, key=rowsacc.get)
-    print("-> BEST:", best, f"{rowsacc[best]:.1f}%")"""),
+    print("-> BEST:", best_is := max(rowsacc, key=rowsacc.get), f"{rowsacc[best_is]:.1f}%")"""),
     ]
     return {
         "cells": cells,

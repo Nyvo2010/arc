@@ -107,9 +107,12 @@ for key in ["model_adaptive", "block_adaptive", "layer_adaptive"]:
         rows.extend(csv.DictReader(open(c)))
     accs = [float(r["acc"]) * 100 for r in rows if r["task"] in mcq]
     print("\\n===", key, "=== avg acc", f"{{sum(accs)/len(accs):.1f}}% over", len(accs), "tasks")
+    tot_gflop = sum(float(r.get("avg_flops_per_item", 0)) for r in rows if r["task"] in mcq) / max(1, len(accs)) / 1e9
+    print("     avg GFLOP/item:", f"{{tot_gflop:.1f}}   acc-per-GFLOP:", f"{{{(sum(accs)/max(1,len(accs)))/tot_gflop:.3f}}}")
     for r in rows:
         if r["task"] in mcq:
-            print(f"  {{r['task']:14s}} acc={{float(r['acc'])*100:5.1f}}  loops={{r['avg_loops_per_item']:>6}}  "
+            g = float(r.get("avg_flops_per_item", 0)) / 1e9
+            print(f"  {{r['task']:14s}} acc={{float(r['acc'])*100:5.1f}}  GFLOP={{g:5.1f}}  acc/G={{float(r['acc'])*100/g:5.2f}}  loops={{r['avg_loops_per_item']:>6}}  "
                   f"decide_p={{r.get('avg_decide_mean_p','-'):>6}}  nan={{r['nan_halts']:>3}}  hist={{r.get('halt_hist','')}}")
         else:
             print(f"  wikitext      ppl={{float(r['ppl']):6.1f}}  loops={{r['avg_loops_per_item']:>6}}  tok/s={{r.get('tokens_per_s','-')}}")"""),
