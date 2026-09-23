@@ -103,15 +103,15 @@ print()
 mcq = ["arc_easy", "piqa"]
 for key in ["model_adaptive", "block_adaptive", "layer_adaptive"]:
     print("\\n=== ", key, " ===")
-    print(f"{{'config':10s}} {{'task':9s}} acc   loops  decide  nan   halts_at")
-    for c in sorted(glob.glob(f"/kaggle/working/calib/calib-{{key}}-*.csv")):
-        cname = os.path.basename(c).replace(f"calib-{{key}}-", "").replace(".csv", "")
+    print(f"{'config':10s} {'task':9s} acc   loops  decide  nan   halts_at")
+    for c in sorted(glob.glob(f"/kaggle/working/calib/calib-{key}-*.csv")):
+        cname = os.path.basename(c).replace(f"calib-{key}-", "").replace(".csv", "")
         rows = list(csv.DictReader(open(c)))
         for r in rows:
             acc = float(r["acc"]) * 100
-            print(f"{{cname:10s}} {{r['task']:9s}} {{acc:5.1f}%  "
-                  f"{{r['avg_loops_per_item']:>5}} {{r['avg_decide_mean_p']:>6}} "
-                  f"{{r['nan_halts']:>4}} {{r['halt_hist']}}")"""),
+            print(f"{cname:10s} {r['task']:9s} {acc:5.1f}%  "
+                  f"{r['avg_loops_per_item']:>5} {r['avg_decide_mean_p']:>6} "
+                  f"{r['nan_halts']:>4} {r['halt_hist']}")"""),
     ]
     return {
         "cells": cells,
