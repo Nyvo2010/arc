@@ -3,16 +3,25 @@ from arc.recurrence.controller import ThresholdController
 from arc.models.base import ARCAdapter
 
 
-def make_controller(scale: str, adapter: ARCAdapter, max_loops: int = 4, compute_budget: float | None = None):
+def make_controller(
+    scale: str,
+    adapter: ARCAdapter | None = None,
+    max_loops: int = 4,
+    compute_budget: float | None = None,
+    controller_kwargs: dict | None = None,
+):
     """Create a controller with appropriate halt head per scale.
 
     Halt head is built per Notion spec:
     - model adaptive: halt head every model turn
     - block adaptive: halt head every transformer block turn
     - layer adaptive: halt head every layer turn
+
+    ``controller_kwargs`` are merged over the ThresholdController defaults so
+    a calibration sweep can tune bias / halting threshold / gains per scale.
     """
     # hidden_dim is adapter-specific; use a default if unknown
-    hidden_dim = getattr(adapter, "hidden_dim", 768)
+    hidden_dim = getattr(adapter, "hidden_dim", 768) if adapter is not None else 768
 
     if scale == "model":
         head = ModelHaltHead(hidden_dim=hidden_dim)
@@ -23,4 +32,11 @@ def make_controller(scale: str, adapter: ARCAdapter, max_loops: int = 4, compute
     else:
         head = None
 
-    return ThresholdController(max_loops=max_loops, compute_budget=compute_budget, halt_head=head)
+    kw = {
+        "max_loops": max_loops,
+        "compute_budget": compute_budget,
+        "halt_head": head,
+    }
+    if controller_kwargs:
+        kw.update(controller_kwargs)
+    return ThresholdController(**kw)

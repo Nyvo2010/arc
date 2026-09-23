@@ -22,7 +22,10 @@ def build_model(
         from arc.recurrence.base import BaseLM
         return BaseLM(adapter)
 
-    controller = make_controller(scale, adapter, max_loops=max_loops, compute_budget=compute_budget)
+    controller = make_controller(
+        scale, adapter, max_loops=max_loops, compute_budget=compute_budget,
+        controller_kwargs=controller_kwargs,
+    )
 
     if scale == "model":
         from arc.recurrence.adaptive import ModelAdaptiveRecurrenceLM

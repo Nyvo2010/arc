@@ -52,6 +52,9 @@ def main() -> None:
     ap.add_argument("--budgeted", action="store_true",
                     help="use the REAL adaptive halt-head path (Policy-T decide()) "
                          "instead of fixed-depth random recurrence")
+    ap.add_argument("--controller", default="",
+                    help="JSON dict of ThresholdController kwargs (calibration sweep); "
+                         "e.g. '{\"bias\": 0.55, \"halt_threshold\": 0.5}'. Applied to adaptive models.")
     ap.add_argument("--out", default="benchmarks/results.csv")
     ap.add_argument("--device_map", default="auto")
     ap.add_argument("--max_len", type=int, default=512)
@@ -61,6 +64,9 @@ def main() -> None:
               for k, v in _parse_kv(args.limits).items()}
     adapters = _parse_kv(args.adapters)
     models = [m for m in args.model.split(",") if m]
+    controller_kwargs = json.loads(args.controller) if args.controller else {}
+    if controller_kwargs:
+        print(f"[bench] controller_kwargs: {controller_kwargs}")
 
     results = {}
     meta = {}
@@ -79,11 +85,13 @@ def main() -> None:
             device_map=args.device_map,
             budgeted=args.budgeted,
             max_loops=args.max_loops,
+            controller_kwargs=controller_kwargs,
         )
         results[key] = res
         meta[key] = {
             "variant": key, "depth": args.depth,
             "budgeted": str(args.budgeted), "max_loops": str(args.max_loops),
+            "controller": json.dumps(controller_kwargs, sort_keys=True),
             "adapter": adapter_dir or "none",
             "source": args.base,
         }

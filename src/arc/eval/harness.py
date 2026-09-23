@@ -37,6 +37,8 @@ class _ModelState:
         self.decide_calls: int = 0
         self.wall_s: float = 0.0
         self.forward_calls: int = 0
+        self.nan_halts: int = 0
+        self.halt_hist: dict[int, int] = {}
 
     def add(self, state: Any, n_items: int = 1, tokens: int = 0) -> None:
         self.items += n_items
@@ -47,6 +49,9 @@ class _ModelState:
         probs = getattr(state, "decide_probs", {})
         self.decide_probs += sum(probs.values()) if probs else 0.0
         self.decide_calls += len(probs) if probs else 0
+        self.nan_halts += int(getattr(state, "nan_halt", 0))
+        for k, v in (getattr(state, "halts_at", {}) or {}).items():
+            self.halt_hist[k] = self.halt_hist.get(k, 0) + v
 
     def add_time(self, sec: float) -> None:
         self.wall_s += max(0.0, sec)
@@ -66,6 +71,8 @@ class _ModelState:
             "tokens_per_s": round(self.tokens / wall, 1),
             "flops_per_s": round(self.compute_used / wall, 1),
             "decisions_per_s": round(self.decide_calls / wall, 1),
+            "nan_halts": self.nan_halts,
+            "halt_hist": ";" .join(f"{k}@{v}" for k, v in sorted(self.halt_hist.items())),
         }
 
 
@@ -78,7 +85,7 @@ class EvalModel:
 
     def __init__(self, key: str, base_path: str, adapter_dir: str | None = None,
                  depth: int = 1, device_map: str = "auto", budgeted: bool = False,
-                 max_loops: int = 4):
+                 max_loops: int = 4, controller_kwargs: dict | None = None):
         if key not in MODEL_VARIANTS:
             raise ValueError(f"unknown model key {key}")
         scale = MODEL_VARIANTS[key]["scale"]
@@ -111,11 +118,12 @@ class EvalModel:
         if self.budgeted:
             from arc.recurrence.builder import build_model
 
-            self.arc_model = build_model(scale, self.adapter, max_loops=max_loops)
+            self.arc_model = build_model(scale, self.adapter, max_loops=max_loops,
+                                         controller_kwargs=controller_kwargs)
         self._last_state: Any = None
         self._chunk_states: list = []
+        self._chunk_token_counts: list = []
         self._last_tokens: int = 0
-        self._chunk_tokens: int = 0
 
     def _forward_adaptive(self, ids: Tensor):
         """Return (logits, state) through the controller path (budgeted)."""
@@ -192,7 +200,7 @@ class EvalModel:
             logits = self.forward_logits(ids)
             if self.budgeted:
                 self._chunk_states.append(self._last_state)
-                self._chunk_tokens += self._last_tokens
+                self._chunk_token_counts.append(self._last_tokens)
             if logits.device != self.device:
                 logits = logits.to(self.device)
             logp = nn.functional.log_softmax(logits.float(), dim=-1)
@@ -259,6 +267,7 @@ def evaluate_model(
     device_map: str = "auto",
     budgeted: bool = False,
     max_loops: int = 4,
+    controller_kwargs: dict | None = None,
 ) -> dict[str, dict]:
     """Run the task suite for one model. Returns {task: metrics}."""
     tokenizer = _get_tokenizer(base_path)
@@ -267,7 +276,7 @@ def evaluate_model(
 
     model = EvalModel(key=key, base_path=base_path, adapter_dir=adapter_dir,
                       depth=depth, device_map=device_map, budgeted=budgeted,
-                      max_loops=max_loops)
+                      max_loops=max_loops, controller_kwargs=controller_kwargs)
     out = {}
     for task in tasks:
         mstate = _ModelState()
@@ -292,12 +301,12 @@ def evaluate_model(
                 "mean_nll": round(tot_nll, 4), "elapsed_s": round(time.perf_counter() - t0, 1),
             }
             if budgeted:
-                for st in model._chunk_states:
-                    mstate.add(st, tokens=model._chunk_tokens)
+                for st, toks in zip(model._chunk_states, model._chunk_token_counts):
+                    mstate.add(st, tokens=toks)
                 mstate.add_time(out[task]["elapsed_s"])
                 out[task].update(mstate.stats())
             model._chunk_states = []
-            model._chunk_tokens = 0
+            model._chunk_token_counts = []
         else:
             n_correct, n_correct_norm, n_tot = 0, 0, 0
             for stem, conts, label in items:

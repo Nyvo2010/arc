@@ -81,9 +81,14 @@ class AdaptiveRecurrentLM(torch.nn.Module):
                     logits_prev = logits_cur.detach()
                     hidden_prev = hidden.detach()
 
-                    if not self.controller.decide(features, state):
+                    halt = not self.controller.decide(features, state)
+                    if halt:
+                        state.record_halt(rec_count)
+                        if getattr(features, "nan", 0):
+                            state.nan_halt += 1
                         break
                     if rec_count >= self.controller.max_loops:
+                        state.record_halt(rec_count)
                         break
 
             final_hidden = adapter.normalize(hidden)

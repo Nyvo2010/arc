@@ -18,6 +18,7 @@ class ControllerFeatures:
     recurrence_count: int
     compute_used: float
     compute_budget: float | None = None
+    nan: int = 0
 
 
 class RecurrenceController:
@@ -54,6 +55,12 @@ class ThresholdController(RecurrenceController):
     threshold. Default is STOP: a loop only runs if the sequence is clearly
     still moving (see the diminishing-returns gate). ``max_loops`` remains a
     hard safety cap, not the operative bound.
+
+    Numerics: all feature math runs in float32 regardless of the model dtype,
+    so fp16 logits / hidden states cannot overflow the entropy or JS sums.
+    Non-finite features (NaN/inf in logits or hidden) are treated as a corrupted
+    pass: the controller defaults to HALT (fail-safe) and counts them so sweeps
+    can detect that the model diverged.
 
     References:
       - js / hidden change are normalized against ``ref_js`` / ``ref_hidden``
@@ -101,7 +108,7 @@ class ThresholdController(RecurrenceController):
 
     @staticmethod
     def _softmax(logits: Tensor) -> Tensor:
-        return torch.softmax(logits, dim=-1)
+        return torch.softmax(logits.float(), dim=-1)
 
     @staticmethod
     def _entropy(p: Tensor) -> float:
@@ -121,10 +128,16 @@ class ThresholdController(RecurrenceController):
         if h_prev is None:
             return 1.0
         eps = 1e-12
-        h_prev_n = h_prev / (h_prev.norm(dim=-1, keepdim=True) + eps)
-        h_cur_n = h_cur / (h_cur.norm(dim=-1, keepdim=True) + eps)
+        h_prev_f = h_prev.float()
+        h_cur_f = h_cur.float()
+        h_prev_n = h_prev_f / (h_prev_f.norm(dim=-1, keepdim=True) + eps)
+        h_cur_n = h_cur_f / (h_cur_f.norm(dim=-1, keepdim=True) + eps)
         cos = (h_prev_n * h_cur_n).sum(dim=-1).mean().item()
         return float(1.0 - max(min(cos, 1.0), -1.0))
+
+    @staticmethod
+    def _finite(x: float, fallback: float = 0.0) -> float:
+        return fallback if not math.isfinite(x) else float(x)
 
     def build_features(
         self,
@@ -138,6 +151,12 @@ class ThresholdController(RecurrenceController):
         self._vocab_size = int(logits_cur.shape[-1])
         p_cur = self._softmax(logits_cur)
         entropy = self._entropy(p_cur)
+
+        nan_cnt = 0
+        for probe in (logits_cur, hidden_cur):
+            if probe is not None:
+                t = probe.float()
+                nan_cnt += int((~torch.isfinite(t)).any().item())
 
         if logits_prev is not None:
             p_prev = self._softmax(logits_prev)
@@ -161,20 +180,30 @@ class ThresholdController(RecurrenceController):
             recurrence_count=recurrence_count,
             compute_used=compute_used,
             compute_budget=self.compute_budget,
+            nan=nan_cnt,
         )
 
     def converged_score(self, features: ControllerFeatures, logits: Tensor | None = None) -> float:
-        """Instability vs convergence in [0,1]; 1 == fully settled, 0 == moving."""
+        """Instability vs convergence in [0,1]; 1 == fully settled, 0 == moving.
+
+        Non-finite features are clamped to the "still moving" extreme (0 score)
+        so a NaN/Inf logits or hidden pass can never pin the controller into an
+        unconditional loop; callers may count them via ``features``.
+        """
         log_v = self._log_vocab(logits) if logits is not None else 1.0
-        js_n = min(features.js_divergence / max(self.ref_js, 1e-9), 1.0)
-        hidden_n = min(features.hidden_cosine_change / max(self.ref_hidden, 1e-9), 1.0)
-        entropy_n = min(features.entropy / max(log_v, 1e-9), 1.0)
-        conf_n = min(max(-features.entropy_delta / max(self.ref_entropy_delta, 1e-9), 0.0), 1.0)
+
+        def _bounded(x: float) -> float:
+            return 0.0 if not math.isfinite(x) else max(0.0, min(float(x), 1.0))
+
+        js_n = _bounded(features.js_divergence / max(self.ref_js, 1e-9))
+        hidden_n = _bounded(features.hidden_cosine_change / max(self.ref_hidden, 1e-9))
+        entropy_n = _bounded(features.entropy / max(log_v, 1e-9))
+        conf_n = _bounded(-features.entropy_delta / max(self.ref_entropy_delta, 1e-9))
 
         score = (
             self.w_js * (1.0 - js_n)
             + self.w_hidden * (1.0 - hidden_n)
-            + self.w_top1 * features.top1_stability
+            + self.w_top1 * _bounded(features.top1_stability)
             + self.w_entropy * (1.0 - entropy_n)
             + self.w_conf * conf_n
         )
@@ -182,6 +211,8 @@ class ThresholdController(RecurrenceController):
 
     @staticmethod
     def _p_halt(score: float, k: float, bias: float) -> float:
+        if not math.isfinite(score):
+            return 1.0
         return 1.0 / (1.0 + math.exp(-k * (score - bias)))
 
     def decide(self, features: ControllerFeatures, state: Any) -> bool:
@@ -189,6 +220,11 @@ class ThresholdController(RecurrenceController):
         if features.recurrence_count >= self.max_loops:
             return False
         if self.compute_budget is not None and features.compute_used >= self.compute_budget:
+            return False
+        non_finite = getattr(features, "nan", 0)
+        if non_finite:
+            # A NaN/inf logits or hidden pass means the recurrence diverged;
+            # halting here (fail-safe) beats looping a corrupted state forward.
             return False
 
         score = self.converged_score(features)
