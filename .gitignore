@@ -38,5 +38,6 @@ coverage.xml
 
 # outputs
 *.csv
+!benchmarks-all-configs.csv
 *.json
 *.log
