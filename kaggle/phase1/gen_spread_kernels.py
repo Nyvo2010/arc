@@ -143,7 +143,7 @@ for key in ["model_adaptive", "block_adaptive", "layer_adaptive"]:
     files = sorted(glob.glob(f"/kaggle/working/spread/spread-{{key}}-*.csv"))
     print("\\n===", key, "===")
     print(f"{{'config':11s}} {{'acc':>5s}} {{'loops':>5s}} {{'nan':>3s}}  hist")
-    rowsacc = {{}}
+    rowsacc = {}
     for c in files:
         rows = list(csv.DictReader(open(c)))
         accs = [float(r["acc"]) * 100 for r in rows if r["task"] in mcq]
