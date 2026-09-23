@@ -134,15 +134,15 @@ for variant in {VARIANTS!r}:
 os.makedirs("/kaggle/output/spread", exist_ok=True)
 csvs = sorted(glob.glob("/kaggle/working/spread/spread-*.csv"))
 for c in csvs:
-    shutil.copy(c, f"/kaggle/output/spread/{{os.path.basename(c)}}")
+    shutil.copy(c, f"/kaggle/output/spread/{os.path.basename(c)}")
 print(len(csvs), "spread CSVs saved")
 mcq = ["arc_easy", "arc_challenge", "hellaswag", "piqa", "winogrande", "boolq", "sciq"]
 def tag_of(fn):
     return os.path.basename(fn)[len("spread-"):].replace(".csv", "")
 for key in ["model_adaptive", "block_adaptive", "layer_adaptive"]:
-    files = sorted(glob.glob(f"/kaggle/working/spread/spread-{{key}}-*.csv"))
+    files = sorted(glob.glob(f"/kaggle/working/spread/spread-{key}-*.csv"))
     print("\\n===", key, "===")
-    print(f"{{'config':11s}} {{'acc':>5s}} {{'loops':>5s}} {{'nan':>3s}}  hist")
+    print(f"{'config':11s} {'acc':>5s} {'loops':>5s} {'nan':>3s}  hist")
     rowsacc = {}
     for c in files:
         rows = list(csv.DictReader(open(c)))
@@ -150,10 +150,10 @@ for key in ["model_adaptive", "block_adaptive", "layer_adaptive"]:
         avg = sum(accs) / len(accs)
         r0 = rows[0]
         hist = r0.get("halt_hist", "")
-        print(f"{{tag_of(c):11s}} {{avg:5.1f}} {{r0['avg_loops_per_item']:>5}} {{r0['nan_halts']:>3}}  {{hist}}")
+        print(f"{tag_of(c):11s} {avg:5.1f} {r0['avg_loops_per_item']:>5} {r0['nan_halts']:>3}  {hist}")
         rowsacc[tag_of(c)] = avg
     best = max(rowsacc, key=rowsacc.get)
-    print("-> BEST:", best, f"{{rowsacc[best]:.1f}}%")"""),
+    print("-> BEST:", best, f"{rowsacc[best]:.1f}%")"""),
     ]
     return {
         "cells": cells,
