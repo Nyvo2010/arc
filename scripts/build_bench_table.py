@@ -81,7 +81,13 @@ def add(path, source, task_label, config, model_filter=None, incl_mcq=True):
         fl = sum(num(r.get("avg_flops_per_item")) for r in mr) / n_items
         lp = sum(num(r.get("avg_loops_per_item")) for r in mr) / n_items
         nan = sum(int(num(r.get("nan_halts")) or 0) for r in mr)
-        hist = next((r.get("halt_hist", "") for r in mr if r.get("halt_hist")), "n/a")
+        # Merge halt_hist counts across ALL task rows (they count unit-turns
+        # per task); taking only the first row understates spread.
+        merged: dict[int, int] = {}
+        for r in mr:
+            for k, v in parse_hist(r.get("halt_hist", "")).items():
+                merged[k] = merged.get(k, 0) + v
+        hist = ";".join(f"{k}@{merged[k]}" for k in sorted(merged)) if merged else "n/a"
         ctrl = mr[0].get("controller") or ""
         try:
             ctrl = json.dumps(json.loads(ctrl), sort_keys=True)

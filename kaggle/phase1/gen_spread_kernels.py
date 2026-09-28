@@ -8,9 +8,15 @@ amounts - some items 1, some 2, some 3, some 4 - chosen per item so that
 accuracy at max_loops=4 is at least as good as every fixed-depth point at
 matched compute.
 
-This kernel: for each variant, run (a) fixed-depth budgeted caps max_loops=1,2,3
-as the reference curve, (b) adaptive configs chosen for spread, (c) one
-"headroom" config at max_loops=8 to show the head stops far below the cap.
+This kernel: for each variant, run (a) fixed-depth forced caps depth=1,2,3
+as the reference curve (non-budgeted path, immune to controller defaults),
+(b) adaptive configs chosen for spread, (c) one "headroom" config at
+max_loops=8 to show the head stops far below the cap.
+
+Controller note: the entropy term is live (converged_score uses the vocab
+cached by build_features). Fixed refs use forced depth so they cannot be
+affected by controller retuning. Runs are resumable: per-config try/except,
+immediate save to /kaggle/output, manifest.json, skip-if-exists.
 
 Usage: python kaggle/phase1/gen_spread_kernels.py
 """
@@ -82,78 +88,111 @@ if not adapter_dirs:
         print("found adapter_config:", root)
     raise SystemExit("No adapters found - is dataset niyuvo/arc-tier-b-adapters attached?")
 open("/kaggle/working/adapters.json", "w").write(json.dumps(adapter_dirs, indent=2))"""),
-        src_cell(f"""import json, os, subprocess, sys
+        src_cell(f"""import csv, glob, json, os, shutil, subprocess, sys
 adapter_dirs = json.load(open("/kaggle/working/adapters.json"))
 CONFIGS = {json.dumps([(c[0], c[1]) for c in CONFIGS])}
 HEADROOM = {json.dumps(list(HEADROOM_CONFIG))}
 tasks = "{SWEEP_TASKS}"
 limits = "{SWEEP_LIMITS}"
 os.makedirs("/kaggle/working/spread", exist_ok=True)
-# fixed-depth reference curve (budgeted caps): max_loops = 1, 2, 3
+os.makedirs("/kaggle/output/spread", exist_ok=True)
+manifest_path = "/kaggle/output/spread/manifest.json"
+manifest = json.load(open(manifest_path)) if os.path.exists(manifest_path) else {{}}
+def save_manifest():
+    json.dump(manifest, open(manifest_path, "w"), indent=1)
+def run(tag, cmd):
+    # Resumable: a failed config must not abort the sweep, and a re-pushed
+    # kernel skips configs already saved (attach prior output as input).
+    final = f"/kaggle/output/spread/spread-{{tag}}.csv"
+    if manifest.get(tag) == "ok" and os.path.exists(final):
+        print("skip (done):", tag, flush=True)
+        return True
+    print(">>>", tag, flush=True)
+    try:
+        subprocess.run(cmd, cwd="/kaggle/working/arc", check=True)
+        shutil.copy(f"/kaggle/working/spread/spread-{{tag}}.csv", final)
+        manifest[tag] = "ok"
+        save_manifest()
+        return True
+    except Exception as e:
+        manifest[tag] = f"FAIL: {{type(e).__name__}}: {{e}}"
+        save_manifest()
+        print("FAILED:", tag, e, flush=True)
+        return False
+# fixed-depth reference curve: FORCED depth via the non-budgeted path.
+# (Old loops2/loops3 CSVs used budgeted caps relying on never-halting
+# controller defaults; forced depth is immune to controller retuning.)
 for variant in {VARIANTS!r}:
     for ml in (1, 2, 3):
-        out = f"/kaggle/working/spread/spread-{{variant}}-fixed{{ml}}.csv"
-        cmd = [sys.executable, "scripts/run_benchmarks.py",
-               "--base", "/kaggle/working/jetmoe-8b",
-               "--model", variant,
-               "--adapters", f"{{variant}}={{adapter_dirs[variant]}}",
-               "--budgeted", "--max_loops", str(ml),
-               "--tasks", tasks, "--limits", limits,
-               "--out", out]
-        print(">>>", variant, "fixed", ml)
-        subprocess.run(cmd, cwd="/kaggle/working/arc", check=True)
-# adaptive configs at max_loops=4
+        run(f"{{variant}}-fixed{{ml}}",
+            [sys.executable, "scripts/run_benchmarks.py",
+             "--base", "/kaggle/working/jetmoe-8b",
+             "--model", variant,
+             "--adapters", f"{{variant}}={{adapter_dirs[variant]}}",
+             "--depth", str(ml),
+             "--tasks", tasks, "--limits", limits,
+             "--out", f"/kaggle/working/spread/spread-{{variant}}-fixed{{ml}}.csv"])
+# adaptive configs at max_loops=4 (entropy term now live via cached vocab)
 for variant in {VARIANTS!r}:
     for cname, ckw in CONFIGS:
-        out = f"/kaggle/working/spread/spread-{{variant}}-{{cname}}.csv"
-        cmd = [sys.executable, "scripts/run_benchmarks.py",
-               "--base", "/kaggle/working/jetmoe-8b",
-               "--model", variant,
-               "--adapters", f"{{variant}}={{adapter_dirs[variant]}}",
-               "--budgeted", "--max_loops", "4",
-               "--tasks", tasks, "--limits", limits,
-               "--controller", json.dumps(ckw),
-               "--out", out]
-        print(">>>", variant, cname, json.dumps(ckw))
-        subprocess.run(cmd, cwd="/kaggle/working/arc", check=True)
+        run(f"{{variant}}-{{cname}}",
+            [sys.executable, "scripts/run_benchmarks.py",
+             "--base", "/kaggle/working/jetmoe-8b",
+             "--model", variant,
+             "--adapters", f"{{variant}}={{adapter_dirs[variant]}}",
+             "--budgeted", "--max_loops", "4",
+             "--tasks", tasks, "--limits", limits,
+             "--controller", json.dumps(ckw),
+             "--out", f"/kaggle/working/spread/spread-{{variant}}-{{cname}}.csv"])
 # headroom: same as spreadE but max_loops=8
 hname, hkw = HEADROOM
 for variant in {VARIANTS!r}:
-    out = f"/kaggle/working/spread/spread-{{variant}}-{{hname}}.csv"
-    cmd = [sys.executable, "scripts/run_benchmarks.py",
-           "--base", "/kaggle/working/jetmoe-8b",
-           "--model", variant,
-           "--adapters", f"{{variant}}={{adapter_dirs[variant]}}",
-           "--budgeted", "--max_loops", "8",
-           "--tasks", tasks, "--limits", limits,
-           "--controller", json.dumps(hkw),
-           "--out", out]
-    print(">>>", variant, hname, json.dumps(hkw))
-    subprocess.run(cmd, cwd="/kaggle/working/arc", check=True)"""),
-        src_cell("""import csv, glob, math, os, shutil, json
+    run(f"{{variant}}-{{hname}}",
+        [sys.executable, "scripts/run_benchmarks.py",
+         "--base", "/kaggle/working/jetmoe-8b",
+         "--model", variant,
+         "--adapters", f"{{variant}}={{adapter_dirs[variant]}}",
+         "--budgeted", "--max_loops", "8",
+         "--tasks", tasks, "--limits", limits,
+         "--controller", json.dumps(hkw),
+         "--out", f"/kaggle/working/spread/spread-{{variant}}-{{hname}}.csv"])
+print("manifest:", json.dumps(manifest, indent=1))"""),
+        src_cell("""import csv, glob, json, os
+from collections import Counter
 os.makedirs("/kaggle/output/spread", exist_ok=True)
-csvs = sorted(glob.glob("/kaggle/working/spread/spread-*.csv"))
-for c in csvs:
-    shutil.copy(c, f"/kaggle/output/spread/{os.path.basename(c)}")
-print(len(csvs), "spread CSVs saved")
+def merge_hist(rows):
+    # Halt hists count unit-turns per task row; merge across ALL tasks.
+    c = Counter()
+    for r in rows:
+        for part in (r.get("halt_hist", "") or "").split(";"):
+            if "@" in part:
+                k, v = part.split("@")
+                try:
+                    c[int(k)] += int(v)
+                except ValueError:
+                    pass
+    return ";".join(f"{k}@{c[k]}" for k in sorted(c)) if c else "n/a"
 mcq = ["arc_easy", "arc_challenge", "hellaswag", "piqa", "winogrande", "boolq", "sciq"]
-def tag_of(fn):
-    return os.path.basename(fn)[len("spread-"):].replace(".csv", "")
 for key in ["model_adaptive", "block_adaptive", "layer_adaptive"]:
     files = sorted(glob.glob(f"/kaggle/working/spread/spread-{key}-*.csv"))
-    print("\\n===", key, "===")
+    print(f"\\n=== {key} ===")
     print(f"{'config':11s} {'acc':>5s} {'loops':>5s} {'GFLOP':>6s} {'acc/G':>5s} {'nan':>3s}  hist")
-    rowsacc = {}
-    for c in files:
-        rows = list(csv.DictReader(open(c)))
-        accs = [float(r["acc"]) * 100 for r in rows if r["task"] in mcq]
+    best, best_acc = None, -1.0
+    for fp in files:
+        rows = [r for r in csv.DictReader(open(fp)) if r["task"] in mcq]
+        if not rows:
+            print(f"  (empty: {os.path.basename(fp)})")
+            continue
+        accs = [float(r["acc"]) * 100 for r in rows]
         avg = sum(accs) / len(accs)
-        gflop = sum(float(r.get("avg_flops_per_item", 0)) for r in rows if r["task"] in mcq) / len(accs) / 1e9
-        r0 = rows[0]
-        hist = r0.get("halt_hist", "")
-        print(f"{tag_of(c):11s} {avg:5.1f} {r0['avg_loops_per_item']:>5.1f} {gflop:6.1f} {avg/gflop:5.2f} {r0['nan_halts']:>3}  {hist}")
-        rowsacc[tag_of(c)] = avg
-    print("-> BEST:", best_is := max(rowsacc, key=rowsacc.get), f"{rowsacc[best_is]:.1f}%")"""),
+        gflop = sum(float(r.get("avg_flops_per_item", 0)) for r in rows) / len(rows) / 1e9
+        loops = sum(float(r.get("avg_loops_per_item", 0)) for r in rows) / len(rows)
+        nan = sum(int(float(r.get("nan_halts", 0) or 0)) for r in rows)
+        tag = os.path.basename(fp)[len(f"spread-{key}-"):-4]
+        print(f"{tag:11s} {avg:5.1f} {loops:5.1f} {gflop:6.1f} {avg/gflop:5.2f} {nan:>3}  {merge_hist(rows)}")
+        if avg > best_acc:
+            best, best_acc = tag, avg
+    print(f"-> BEST: {best} {best_acc:.1f}%")"""),
     ]
     return {
         "cells": cells,

@@ -275,7 +275,14 @@ class ThresholdController:
         }
 
     def converged_score(self, features, logits=None):
-        log_v = self._log_vocab(logits) if logits is not None else 1.0
+        if logits is not None:
+            log_v = self._log_vocab(logits)
+        elif self._vocab_size is not None:
+            # decide() has no logits arg; reuse the vocab cached by the last
+            # build_features() call so entropy normalization stays live.
+            log_v = float(math.log(max(2, self._vocab_size)))
+        else:
+            log_v = 1.0
         js_n = min(features["js_divergence"] / max(self.ref_js, 1e-9), 1.0)
         hidden_n = min(features["hidden_cosine_change"] / max(self.ref_hidden, 1e-9), 1.0)
         entropy_n = min(features["entropy"] / max(log_v, 1e-9), 1.0)

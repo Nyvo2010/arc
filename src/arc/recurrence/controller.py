@@ -189,8 +189,19 @@ class ThresholdController(RecurrenceController):
         Non-finite features are clamped to the "still moving" extreme (0 score)
         so a NaN/Inf logits or hidden pass can never pin the controller into an
         unconditional loop; callers may count them via ``features``.
+
+        Entropy normalization uses the cached vocab size from the most recent
+        ``build_features`` call (``decide`` does not receive logits directly),
+        so the entropy term is live. Only when no features were ever built
+        does it fall back to ``log_v=1.0``.
         """
-        log_v = self._log_vocab(logits) if logits is not None else 1.0
+        log_v = (
+            self._log_vocab(logits)
+            if logits is not None
+            else float(math.log(max(2, self._vocab_size)))
+            if self._vocab_size is not None
+            else 1.0
+        )
 
         def _bounded(x: float) -> float:
             return 0.0 if not math.isfinite(x) else max(0.0, min(float(x), 1.0))
