@@ -22,6 +22,7 @@ from torch import Tensor, nn
 
 from arc.eval.tasks import TASKS
 from arc.models.registry import MODEL_VARIANTS, create_adapter
+from arc.recurrence.state import RecurrenceState
 from arc.training.random_recurrence import random_recurrence_forward
 
 
@@ -124,6 +125,8 @@ class EvalModel:
         self._chunk_states: list = []
         self._chunk_token_counts: list = []
         self._last_tokens: int = 0
+        self._last_flops: float = 0.0
+        self._last_executions: int = 0
 
     def _forward_adaptive(self, ids: Tensor):
         """Return (logits, state) through the controller path (budgeted)."""
@@ -132,6 +135,27 @@ class EvalModel:
         # tokens processed = executions(loops total) x batch x seq_len
         self._last_tokens = int(getattr(st, "executions", 0)) * int(ids.shape[0]) * int(ids.shape[1])
         return res.logits, st
+
+    def _single_pass_flops(self, ids: Tensor) -> tuple[float, int]:
+        """Analytic single-pass FLOPs with the same unit_flops accounting as
+        the recurrent paths (numerics untouched: native forward still used)."""
+        seq_len = int(ids.shape[1])
+        batch = int(ids.shape[0])
+        tot = 0.0
+        n = 0
+        if self.scale in ("base", "model"):
+            tot += float(self.adapter.unit_flops("model", 0, seq_len, batch_size=batch))
+            n = 1
+        elif self.scale == "block":
+            for u in range(self.adapter.num_blocks()):
+                tot += float(self.adapter.unit_flops("block", u, seq_len, batch_size=batch))
+                n += 1
+        elif self.scale == "layer":
+            for u in range(self.adapter.num_layers()):
+                tot += float(self.adapter.unit_flops("layer", u, seq_len, batch_size=batch))
+                n += 1
+        tot += float(self.adapter.lm_head_flops_per_token()) * seq_len * batch
+        return tot, n
 
     @torch.no_grad()
     def forward_logits(self, input_ids: Tensor):
@@ -142,8 +166,11 @@ class EvalModel:
             return logits
         if self.eff_depth == 1 or self.scale == "base":
             h, logits = self.adapter.forward_native(ids)
+            self._last_flops, self._last_executions = self._single_pass_flops(ids)
             return logits
         out = random_recurrence_forward(self.adapter, self.scale, ids, depth=self.eff_depth)
+        self._last_flops = float(out["flops_est"])
+        self._last_executions = int(out["executions"])
         return out["logits"]
 
     @torch.no_grad()
@@ -315,6 +342,14 @@ def evaluate_model(
                 scores = model.score_choices([ctx_ids] * len(cont_ids), cont_ids)
                 if budgeted and getattr(model, "_last_state", None) is not None:
                     mstate.add(model._last_state, tokens=model._last_tokens)
+                elif not budgeted:
+                    # Fixed-depth path: record the same loop/flop accounting so
+                    # forced-depth references have a compute axis.
+                    mstate.add(RecurrenceState(
+                        scale=model.scale,
+                        compute_used=float(getattr(model, "_last_flops", 0.0)),
+                        executions=int(getattr(model, "_last_executions", 0)),
+                    ))
                 if batch_choices:
                     pass
                 pred = max(range(len(scores)), key=lambda i: scores[i] if scores[i] != float("-inf") else float("-inf"))
@@ -336,7 +371,7 @@ def evaluate_model(
                 "acc_norm": round(n_correct_norm / max(1, n_tot), 4),
                 "elapsed_s": round(time.perf_counter() - t0, 1),
             }
-            if budgeted:
+            if mstate.items:
                 mstate.add_time(out[task]["elapsed_s"])
                 out[task].update(mstate.stats())
     _free_gpu(model)
