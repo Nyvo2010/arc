@@ -121,9 +121,28 @@ print("ALL DONE")"""
 
 
 if __name__ == "__main__":
-    out_dir = HERE / "calib-tierb"
+    out_dir = HERE / "haltcal-tierb"
     out_dir.mkdir(parents=True, exist_ok=True)
     nb = build_notebook()
-    path = out_dir / "arc-calibrate-tierb.ipynb"
+    path = out_dir / "arc-haltcal-tierb.ipynb"
     path.write_text(json.dumps(nb, indent=1))
-    print("wrote", path)
+    # Own kernel slug: the sibling calib-tierb/ directory already owns
+    # niyuvo/arc-calib-suite-tier-b, and `kaggle kernels push -p` reuses that
+    # metadata when it is present, which would silently re-run the old sweep.
+    meta = {
+        "id": "niyuvo/arc-haltcal-tier-b",
+        "title": "ARC Halt Head Calibration Tier B",
+        "code_file": path.name,
+        "language": "python",
+        "kernel_type": "notebook",
+        "is_private": True,
+        "enable_gpu": True,
+        "enable_internet": True,
+        "machine_shape": "NvidiaTeslaT4",
+        "competition_sources": [],
+        "dataset_sources": ["niyuvo/arc-tier-b-adapters"],
+        "kernel_sources": [],
+        "model_sources": [],
+    }
+    (out_dir / "kernel-metadata.json").write_text(json.dumps(meta, indent=2) + "\n")
+    print("wrote", path, "and kernel-metadata.json")
