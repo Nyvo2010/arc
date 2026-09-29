@@ -121,6 +121,12 @@ class EvalModel:
 
             self.arc_model = build_model(scale, self.adapter, max_loops=max_loops,
                                          controller_kwargs=controller_kwargs)
+            # Exposed so calibration tooling can reuse the exact feature
+            # implementation the live path uses (no duplicate feature math).
+            self.controller = getattr(self.arc_model, "controller", None)
+        else:
+            self.arc_model = None
+            self.controller = None
         self._last_state: Any = None
         self._chunk_states: list = []
         self._chunk_token_counts: list = []

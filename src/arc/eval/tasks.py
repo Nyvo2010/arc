@@ -184,3 +184,40 @@ TASKS: dict[str, dict] = {
         "split": "validation",
     },
 }
+
+# Held-out CALIBRATION tasks. These are the TRAIN splits, disjoint from every
+# split used for reported benchmarks (test / validation), so halt-head
+# calibration cannot overfit the numbers we publish. Winogrande is omitted
+# because winogrande_xl exposes no labelled train split.
+CALIB_TASKS: dict[str, dict] = {
+    "arc_easy": {
+        "loader": lambda limit: _arca_task("train", limit)(),
+        "default_limit": 400,
+        "split": "train",
+    },
+    "arc_challenge": {
+        "loader": lambda limit: _arc_choice_task("train", limit)(),
+        "default_limit": 400,
+        "split": "train",
+    },
+    "hellaswag": {
+        "loader": lambda limit: _hellaswag("train", limit)(),
+        "default_limit": 400,
+        "split": "train",
+    },
+    "piqa": {
+        "loader": lambda limit: _piqa("train", limit)(),
+        "default_limit": 400,
+        "split": "train",
+    },
+    "boolq": {
+        "loader": lambda limit: _boolq("train", limit)(),
+        "default_limit": 400,
+        "split": "train",
+    },
+    "sciq": {
+        "loader": lambda limit: _sciq("train", limit)(),
+        "default_limit": 400,
+        "split": "train",
+    },
+}
