@@ -192,7 +192,7 @@ def cmd_collect(args) -> None:
                 for stem, conts, label in items:
                     ctx_ids = _tokenize(tokenizer, stem)
                     cont_ids = [_tokenize(tokenizer, c) for c in conts]
-                    ids, span_mask = build_batch(model, ctx_ids, cont_ids)
+                    ids, span_mask = build_batch(model, ctx_ids, cont_ids, torch=torch)
                     with torch.no_grad():
                         rec = record_item(model, ids, span_mask, args.max_loops,
                                           cont_ids=cont_ids, torch=torch, nn=nn)
@@ -207,21 +207,27 @@ def cmd_collect(args) -> None:
         torch.cuda.empty_cache()
 
 
-def build_batch(model: EvalModel, ctx_ids, cont_ids):
-    """Replicate harness batching: pad choices, return (ids, cont span mask)."""
+def build_batch(model, ctx_ids, cont_ids, torch=None):
+    """Replicate harness batching: pad choices, return (ids, cont span mask).
+
+    ``ctx_ids`` is a single 1-D tensor (the harness wraps it per choice), so its
+    length is read with ``shape`` - a truthiness test on a multi-element
+    tensor raises.
+    """
     device = model.device
-    max_ctx = max(int(len(c)) for c in ctx_ids) if ctx_ids else 0
-    max_cont = max(int(len(c)) for c in cont_ids) if cont_ids else 0
-    pad = model.adapter.hf_model.config.pad_token_id or 0
+    max_ctx = int(ctx_ids.shape[0]) if ctx_ids is not None else 0
+    max_cont = max(int(c.shape[0]) for c in cont_ids) if cont_ids else 0
+    pad_id = getattr(model.adapter.hf_model.config, "pad_token_id", None)
+    pad = 0 if pad_id is None else int(pad_id)
     seq_len = max_ctx + max_cont
     B = len(cont_ids)
     ids = torch.full((B, seq_len), pad, dtype=torch.long, device=device)
     mask = torch.zeros((B, seq_len), dtype=torch.bool, device=device)
-    for i, (c, ct) in enumerate(zip(ctx_ids, cont_ids)):
-        ln = min(len(c), max_ctx)
+    for i, (c, ct) in enumerate(zip([ctx_ids] * B, cont_ids)):
+        ln = min(int(c.shape[0]), max_ctx)
         ids[i, :ln] = c[:ln].to(device)
         s = min(ln, seq_len)
-        e = min(s + len(ct), seq_len)
+        e = min(s + int(ct.shape[0]), seq_len)
         ids[i, s:e] = ct[: e - s].to(device)
         mask[i, s:e] = True
     return ids, mask
