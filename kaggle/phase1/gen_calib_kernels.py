@@ -1,11 +1,16 @@
-"""Generate the halt-head calibration sweep kernel (Tier B, post-eval).
+"""Generate the halt-head calibration kernel (trajectory replay).
 
-The budgeted v1 run showed the formula controller NEVER halts: every adaptive
-row ran to exactly ``max_loops`` and ``avg_decide_mean_p=nan`` (fp16 logits
-overflow the feature math; NaN >= threshold is always False -> CONTINUE). This
-kernel sweeps ThresholdController calibration per variant over a small
-benchmark subset (arc_easy + piqa), using the trained adapters from the private
-Kaggle dataset ``niyuvo/arc-tier-b-adapters``.
+Runs ONE GPU pass per variant that records the full-depth recurrent trajectory
+per calibration item (controller features + per-choice loglikelihoods at every
+loop). Because the hidden state at loop t does not depend on the halt decision,
+that single recording is sufficient to replay ANY controller policy offline -
+so we calibrate over hundreds of configs instead of the 4-8 that full-benchmark
+sweeps allowed.
+
+Calibration uses CALIB_TASKS (TRAIN splits), which are disjoint from every
+split used for the reported benchmarks, so the chosen operating point is not
+fit to the test numbers. The sweep is then re-scored on the benchmark splits
+in a second (also single-pass) collection.
 
 Usage: python kaggle/phase1/gen_calib_kernels.py
 """
@@ -16,28 +21,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 VARIANTS = ["model_adaptive", "block_adaptive", "layer_adaptive"]
-TASKS = "arc_easy,piqa"
-LIMITS = "arc_easy=30,piqa=30"
-
-# (name, controller_kwargs) — tuned halting thumb: with defaults halting needs
-# score >= ~0.58 which is nearly unreachable, so bias/halt_threshold/min_gain
-# are lowered to make HALT fire on weakly-converged passes.
-#
-# Sweep 1 result: "early4" (bias .4/k10/thr .35/mg .06) drove nearly every item
-# to exactly 2 recursions and exactly reproduced the loops2 hard-cap accuracy
-# (model 56.7/80, block 76.7/86.7; layer 63.3/86.7 within noise of 73.3/90).
-# This refinement sweep brackets early4: re-runs it (determinism anchor), probes
-# slightly softer profiles that let a fraction of items reach recursion 3-4
-# (matching the train-time "a bit of 3-4"), and one maximal-2-pressure config.
-CONFIGS = [
-    ("early4", {"bias": 0.4, "k": 10, "halt_threshold": 0.35, "min_gain": 0.06}),
-    ("early4k8", {"bias": 0.4, "k": 8, "halt_threshold": 0.35, "min_gain": 0.06}),
-    ("early45", {"bias": 0.42, "k": 10, "halt_threshold": 0.36, "min_gain": 0.055}),
-    ("mixed", {"bias": 0.45, "k": 12, "halt_threshold": 0.38, "min_gain": 0.05}),
-    ("soft3", {"bias": 0.5, "k": 10, "halt_threshold": 0.42, "min_gain": 0.035}),
-    ("hard2b", {"bias": 0.38, "k": 12, "halt_threshold": 0.33, "min_gain": 0.07}),
-    ("settle", {"bias": 0.55, "k": 12, "halt_threshold": 0.50, "min_gain": 0.02}),
-]
+MAX_LOOPS = 8
+LIMIT = 60
+CALIB_TASKS = "arc_easy,arc_challenge,hellaswag,piqa,boolq,sciq"
+# Wider, denser grid than before: offline replay makes this nearly free.
+SWEEP_ARGS = (
+    f"--caps 2,3,4,6,8 "
+    f"--biases 0.20,0.30,0.40,0.50,0.60,0.70 "
+    f"--ks 4,8,14,24 "
+    f"--thresholds 0.30,0.45,0.60,0.75 "
+    f"--min_gains 0.0,0.02,0.04,0.07"
+)
 
 
 def src_cell(src: str) -> dict:
@@ -47,7 +41,6 @@ def src_cell(src: str) -> dict:
 
 
 def build_notebook() -> dict:
-    cfgs = json.dumps(CONFIGS)
     cells = [
         src_cell("""import os
 try:
@@ -55,107 +48,82 @@ try:
     os.environ["HF_TOKEN"] = UserSecretsClient().get_secret("HF_TOKEN")
     print("HF_TOKEN attached:", True)
 except Exception as e:
-    print("HF_TOKEN missing (calibration still runs):", e)"""),
+    print("HF_TOKEN missing (private adapter dataset may fail):", e)"""),
         src_cell("""!rm -rf /kaggle/working/arc && git clone --branch stage-a-cpt https://github.com/Nyvo2010/arc.git /kaggle/working/arc
 !pip install -q -r /kaggle/working/arc/requirements-kaggle.txt"""),
         src_cell("""from huggingface_hub import snapshot_download
 snapshot_download(repo_id="jetmoe/jetmoe-8b", local_dir="/kaggle/working/jetmoe-8b")
 print("weights ready")"""),
-        src_cell(f"""import glob, json, os
+        src_cell("""import glob, json, os
 from pathlib import Path
-adapter_dirs = {{}}
-for variant in {VARIANTS!r}:
+adapter_dirs = {}
+for variant in %r:
     v = variant.split("_")[0]
-    cands = sorted(glob.glob(f"/kaggle/input/**/{{v}}/adapter", recursive=True))
-    cands += sorted(glob.glob("/kaggle/input/arc-tier-b-adapters/{{v}}/adapter"))
+    cands = sorted(glob.glob(f"/kaggle/input/**/{v}/adapter", recursive=True))
     hits = [c for c in cands if (Path(c) / "adapter_config.json").exists()]
     if hits:
         adapter_dirs[variant] = hits[0]
-        print(f"adapter [{{variant}}] ->{{hits[0]}}")
+        print(f"adapter [{variant}] -> {hits[0]}")
     else:
-        print(f"!! NO adapter output for [{{variant}}]")
+        print(f"!! NO adapter for [{variant}]")
 if not adapter_dirs:
     print("INPUT DIRS:", os.listdir("/kaggle/input"))
-    for root in (Path("/kaggle/input")).rglob("adapter_config.json"):
-        print("found adapter_config:", root)
-    print("DATASETS DIR:", os.listdir("/kaggle/input/datasets") if os.path.isdir("/kaggle/input/datasets") else "n/a")
-    raise SystemExit("No adapters found - is dataset niyuvo/arc-tier-b-adapters attached?")
-open("/kaggle/working/adapters.json", "w").write(json.dumps(adapter_dirs, indent=2))"""),
-        src_cell(f"""import json, os, subprocess, sys
-adapter_dirs = json.load(open("/kaggle/working/adapters.json"))
-CONFIGS = {cfgs}
-tasks = "{TASKS}"
-limits = "{LIMITS}"
-os.makedirs("/kaggle/working/calib", exist_ok=True)
-for variant in {VARIANTS!r}:
-    for cname, ckw in CONFIGS:
-        out = f"/kaggle/working/calib/calib-{{variant}}-{{cname}}.csv"
-        cmd = [sys.executable, "scripts/run_benchmarks.py",
-               "--base", "/kaggle/working/jetmoe-8b",
-               "--model", variant,
-               "--adapters", f"{{variant}}={{adapter_dirs[variant]}}",
-               "--budgeted", "--max_loops", "4",
-               "--tasks", tasks, "--limits", limits,
-               "--controller", json.dumps(ckw),
-               "--out", out]
-        print(">>>", variant, cname, json.dumps(ckw))
-        subprocess.run(cmd, cwd="/kaggle/working/arc", check=True)"""),
-        src_cell("""import csv, glob, math, os, shutil, json
-os.makedirs("/kaggle/output/calib", exist_ok=True)
-csvs = sorted(glob.glob("/kaggle/working/calib/calib-*.csv"))
-for c in csvs:
-    shutil.copy(c, f"/kaggle/output/calib/{{os.path.basename(c)}}")
-print(f"{{len(csvs)}} calibration CSVs saved")
-print()
-mcq = ["arc_easy", "piqa"]
-for key in ["model_adaptive", "block_adaptive", "layer_adaptive"]:
-    print("\\n=== ", key, " ===")
-    print(f"{'config':10s} {'task':9s} acc   loops  decide  nan   halts_at")
-    for c in sorted(glob.glob(f"/kaggle/working/calib/calib-{key}-*.csv")):
-        cname = os.path.basename(c).replace(f"calib-{key}-", "").replace(".csv", "")
-        rows = list(csv.DictReader(open(c)))
-        for r in rows:
-            acc = float(r["acc"]) * 100
-            print(f"{cname:10s} {r['task']:9s} {acc:5.1f}%  "
-                  f"{r['avg_loops_per_item']:>5} {r['avg_decide_mean_p']:>6} "
-                  f"{r['nan_halts']:>4} {r['halt_hist']}")"""),
+    raise SystemExit("no adapters found")
+open("/kaggle/working/adapters.json","w").write(json.dumps(adapter_dirs, indent=2))"""
+                 % (VARIANTS,)),
+        src_cell("""import json, subprocess, sys
+adapters = json.load(open("/kaggle/working/adapters.json"))
+os.makedirs("/kaggle/output/traj", exist_ok=True)
+os.makedirs("/kaggle/output/sweep", exist_ok=True)
+
+# One collect pass per (variant, task_set). Each writes a trajectory JSONL.
+for variant in %r:
+    ad = f"{variant}={adapters[variant]}"
+    for task_set, tasks in (("calib", "%s"), ("bench", "%s")):
+        out = f"/kaggle/output/traj/{variant}-{task_set}.jsonl"
+        if os.path.exists(out) and os.path.getsize(out) > 0:
+            print("skip (exists):", out, flush=True)
+            continue
+        print(f">>> collect {variant} {task_set}", flush=True)
+        subprocess.run([sys.executable, "scripts/calibrate_halt.py", "collect",
+                        "--base", "/kaggle/working/jetmoe-8b",
+                        "--model", variant, "--adapters", ad,
+                        "--task_set", task_set, "--tasks", tasks,
+                        "--limit", "%d", "--max_loops", "%d",
+                        "--out", out],
+                       cwd="/kaggle/working/arc", check=True)
+
+# Offline replay: the whole grid, no GPU needed.
+for variant in %r:
+    for task_set in ("calib", "bench"):
+        traj = f"/kaggle/output/traj/{variant}-{task_set}.jsonl"
+        if not os.path.exists(traj):
+            print("MISSING", traj, flush=True); continue
+        print(f">>> sweep {variant} {task_set}", flush=True)
+        subprocess.run([sys.executable, "scripts/calibrate_halt.py", "sweep",
+                        "--traj", traj,
+                        "--out", f"/kaggle/output/sweep/{variant}-{task_set}-sweep.csv",
+                        "%s"],
+                       cwd="/kaggle/working/arc", check=True)
+print("ALL DONE")"""
+                 % (VARIANTS, CALIB_TASKS, CALIB_TASKS, LIMIT, MAX_LOOPS,
+                    VARIANTS, SWEEP_ARGS)),
     ]
     return {
         "cells": cells,
         "metadata": {
             "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-            "language_info": {"name": "python", "version": "3.10"},
+            "language_info": {"name": "python", "version": "3.12.0"},
         },
         "nbformat": 4,
         "nbformat_minor": 5,
     }
 
 
-def build_metadata() -> dict:
-    return {
-        "id": "niyuvo/arc-calib-suite-tier-b",
-        "title": "ARC Calib Suite Tier B",
-        "code_file": "arc-calib-suite-tierb.ipynb",
-        "language": "python",
-        "kernel_type": "notebook",
-        "is_private": True,
-        "enable_gpu": True,
-        "enable_internet": True,
-        "machine_shape": "NvidiaTeslaT4",
-        "competition_sources": [],
-        "dataset_sources": ["niyuvo/arc-tier-b-adapters"],
-        "kernel_sources": [],
-        "model_sources": [],
-    }
-
-
-def main() -> None:
-    d = HERE / "calib-tierb"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "arc-calib-suite-tierb.ipynb").write_text(json.dumps(build_notebook(), indent=1))
-    (d / "kernel-metadata.json").write_text(json.dumps(build_metadata(), indent=2))
-    print("wrote", d)
-
-
 if __name__ == "__main__":
-    main()
+    out_dir = HERE / "calib-tierb"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    nb = build_notebook()
+    path = out_dir / "arc-calibrate-tierb.ipynb"
+    path.write_text(json.dumps(nb, indent=1))
+    print("wrote", path)
