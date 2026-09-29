@@ -114,7 +114,8 @@ def add(path, source, task_label, config, model_filter=None, incl_mcq=True):
 
 
 out = []
-E = "/var/folders/7n/hcs67gyj0q9gy3xmdb_5zq6m0000gn/T/opencode/recalc"
+E = "/tmp/recalc"
+S = "/tmp/spread-v4/spread"
 
 # base model (single native pass) from the budgeted recap CSV
 add(f"{E}/eval/benchmarks-tierb-budgeted.csv", "recap", "7-task", "base-1x", model_filter="base")
@@ -130,6 +131,12 @@ for c in ["early4", "early4k8", "early45", "mixed", "soft3", "hard2b", "settle"]
 # hard2b full 7-task
 for v in ["model", "block", "layer"]:
     add(f"{E}/calibfinal/calib_final/calibfinal-{v}_adaptive.csv", "calib-final", "7-task", "hard2b")
+# spread sweep v4: forced-depth fixed refs + adaptive configs, 7-task n=30
+# (entropy term live; fixed refs carry real FLOPs via harness accounting)
+for v in ["model", "block", "layer"]:
+    for c in ["fixed1", "fixed2", "fixed3", "spreadA", "spreadB", "spreadC",
+              "spreadE", "hard2b", "default", "headroomE8"]:
+        add(f"{S}/spread-{v}_adaptive-{c}.csv", "spread-v4", "7-task", c)
 
 cols = ["model", "source", "tasks", "config", "n_tasks", "n_items",
         "acc_pct", "acc_norm_pct",
