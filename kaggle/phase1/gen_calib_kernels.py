@@ -129,8 +129,9 @@ if __name__ == "__main__":
     # Own kernel slug: the sibling calib-tierb/ directory already owns
     # niyuvo/arc-calib-suite-tier-b, and `kaggle kernels push -p` reuses that
     # metadata when it is present, which would silently re-run the old sweep.
+    # The id MUST match the slug the title resolves to, or SaveKernel 409s.
     meta = {
-        "id": "niyuvo/arc-haltcal-tier-b",
+        "id": "niyuvo/arc-halt-head-calibration-tier-b",
         "title": "ARC Halt Head Calibration Tier B",
         "code_file": path.name,
         "language": "python",
