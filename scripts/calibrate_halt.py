@@ -91,7 +91,7 @@ def record_item(model, ids, span_mask, max_loops: int, cont_ids=None, torch=None
     shift_labels = ids[:, 1:]
     span = span_mask[:, 1:]
 
-    def choice_scores(logits: Tensor) -> list[float]:
+    def choice_scores(logits) -> list[float]:
         logp = nn.functional.log_softmax(logits.float(), dim=-1)
         shift_logp = logp[:, :-1]
         out = []
@@ -100,9 +100,12 @@ def record_item(model, ids, span_mask, max_loops: int, cont_ids=None, torch=None
             if nz.numel() == 0:
                 out.append(float("-inf"))
                 continue
-            toks = shift_labels[i][nz]
-            lg = shift_logp[i][nz].gather(-1, toks.unsqueeze(-1)).squeeze(-1)
-            out.append(float(lg.sum()))
+            toks = shift_labels[i][nz].cpu()
+            # nz, toks are on CPU for gather to avoid device mismatch in mixed
+            # scenarios where shift_logp lives on GPU.
+            sub = shift_logp[i][nz].detach().cpu()
+            lg = sub.gather(-1, toks.unsqueeze(-1))
+            out.append(float(lg.squeeze(-1).sum()))
         return out
 
     unit_records = []
