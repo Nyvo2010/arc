@@ -90,18 +90,24 @@ def record_item(model, ids, span_mask, max_loops: int, cont_ids=None, torch=None
 
     shift_labels = ids[:, 1:]
     span = span_mask[:, 1:]
+    # Move scoring tensors to CPU once to avoid multi-GPU device mismatches
+    shift_labels_cpu = shift_labels.detach().cpu()
+    span_cpu = span.detach().cpu()
 
     def choice_scores(logits) -> list[float]:
+        # Move to CPU for stable indexing - trajectory collection is I/O bound,
+        # small CPU overhead is acceptable and avoids multi-GPU device mismatches.
+        logits = logits.detach().cpu()
         logp = nn.functional.log_softmax(logits.float(), dim=-1)
         shift_logp = logp[:, :-1]
         out = []
         for i in range(B):
-            nz = span[i].nonzero(as_tuple=True)[0].cpu()
+            nz = span_cpu[i].nonzero(as_tuple=True)[0]
             if nz.numel() == 0:
                 out.append(float("-inf"))
                 continue
-            toks = shift_labels[i][nz].cpu()
-            sub = shift_logp[i][nz].detach().cpu()
+            toks = shift_labels_cpu[i][nz]
+            sub = shift_logp[i][nz]
             lg = sub.gather(-1, toks.unsqueeze(-1))
             out.append(float(lg.squeeze(-1).sum()))
         return out
