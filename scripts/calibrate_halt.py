@@ -231,6 +231,18 @@ def build_batch(model, ctx_ids, cont_ids, torch=None):
         ids[i, s:e] = ct[: e - s].to(device)
         mask[i, s:e] = True
     return ids, mask
+    seq_len = max_ctx + max_cont
+    B = len(cont_ids)
+    ids = torch.full((B, seq_len), pad, dtype=torch.long, device=device)
+    mask = torch.zeros((B, seq_len), dtype=torch.bool, device=device)
+    for i, (c, ct) in enumerate(zip([ctx_ids] * B, cont_ids)):
+        ln = min(int(c.shape[0]), max_ctx)
+        ids[i, :ln] = c[:ln].to(device)
+        s = min(ln, seq_len)
+        e = min(s + int(ct.shape[0]), seq_len)
+        ids[i, s:e] = ct[: e - s].to(device)
+        mask[i, s:e] = True
+    return ids, mask
 
 
 # --------------------------------------------------------------------------
