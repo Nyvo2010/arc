@@ -128,6 +128,9 @@ class ThresholdController(RecurrenceController):
         if h_prev is None:
             return 1.0
         eps = 1e-12
+        # Ensure both tensors are on the same device for PEFT multi-GPU setups
+        if h_prev.device != h_cur.device:
+            h_prev = h_prev.to(h_cur.device)
         h_prev_f = h_prev.float()
         h_cur_f = h_cur.float()
         h_prev_n = h_prev_f / (h_prev_f.norm(dim=-1, keepdim=True) + eps)
